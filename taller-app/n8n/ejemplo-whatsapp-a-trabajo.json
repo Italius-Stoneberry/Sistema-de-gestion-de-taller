@@ -1,0 +1,92 @@
+{
+  "name": "Taller — WhatsApp/correo a Trabajo (ejemplo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "taller-ingreso",
+        "options": {}
+      },
+      "id": "webhook-entrada",
+      "name": "Entrada (WAHA / correo)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300],
+      "webhookId": "taller-ingreso"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3:14b\",\n  \"stream\": false,\n  \"format\": \"json\",\n  \"prompt\": \"Sos un asistente que extrae datos de un mensaje de un taller. Devolve SOLO un JSON valido con las claves: cliente, descripcion, disciplina (uno de: laser, serigrafia, ploteo), precio (numero o 0). Si no es un pedido de trabajo devolve {\\\"ignorar\\\": true}. Mensaje: \" + JSON.stringify($json.body.texto || $json.body.message || \"\")\n}",
+        "options": {}
+      },
+      "id": "ollama",
+      "name": "Ollama — extraer JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ollama devuelve { response: '<json en texto>' }. Lo parseamos.\nlet datos = {};\ntry { datos = JSON.parse($json.response); } catch (e) { datos = { ignorar: true }; }\nreturn [{ json: datos }];"
+      },
+      "id": "parse",
+      "name": "Parsear salida",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ignorar }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "es-trabajo",
+      "name": "¿Es un pedido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://app:3000/api/ingesta/trabajo",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "PEGA_ACA_TU_INGEST_API_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"cliente\": $json.cliente,\n  \"descripcion\": $json.descripcion,\n  \"disciplina\": $json.disciplina,\n  \"precio\": $json.precio,\n  \"origen_ref\": \"WhatsApp/correo \" + $now.toISO()\n}",
+        "options": {}
+      },
+      "id": "crear",
+      "name": "Crear en la app (borrador)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 220]
+    }
+  ],
+  "connections": {
+    "Entrada (WAHA / correo)": { "main": [[{ "node": "Ollama — extraer JSON", "type": "main", "index": 0 }]] },
+    "Ollama — extraer JSON": { "main": [[{ "node": "Parsear salida", "type": "main", "index": 0 }]] },
+    "Parsear salida": { "main": [[{ "node": "¿Es un pedido?", "type": "main", "index": 0 }]] },
+    "¿Es un pedido?": { "main": [[{ "node": "Crear en la app (borrador)", "type": "main", "index": 0 }], []] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
