@@ -1,0 +1,46 @@
+/* ================================================================
+   ESTILO MÍNIMO A PROPÓSITO.
+   Esta capa visual es "sin diseño": solo lo necesario para que sea
+   usable. Reemplazá esto por tu paleta / tipografías de la V1 final
+   (Stitch, landing, etc.) sin tocar la lógica de app.js.
+   ================================================================ */
+* { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; margin: 0; color: #111; }
+.oculto { display: none !important; }
+.error { color: #b00; min-height: 1em; }
+
+/* Login */
+.pantalla { display: flex; justify-content: center; padding: 40px 16px; }
+.card { display: flex; flex-direction: column; gap: 10px; width: 320px; max-width: 100%; border: 1px solid #ccc; padding: 20px; }
+.card label { display: flex; flex-direction: column; gap: 4px; }
+
+/* Barra superior */
+.barra { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid #ccc; }
+.barra .spacer { flex: 1; }
+#menu { display: flex; gap: 4px; flex-wrap: wrap; }
+#menu button { border: 1px solid #ccc; background: #f4f4f4; padding: 4px 10px; cursor: pointer; }
+#menu button.activo { background: #ddd; font-weight: bold; }
+.link { border: none; background: none; text-decoration: underline; cursor: pointer; }
+
+/* Contenido */
+main { padding: 16px; }
+h2 { margin-top: 0; }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 14px; }
+th { background: #f4f4f4; }
+input, select, textarea, button { font: inherit; padding: 4px 6px; }
+.filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-bottom: 8px; }
+.filtros label { display: flex; flex-direction: column; font-size: 13px; }
+.acciones { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Formulario (modal simple) */
+.modal-fondo { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; justify-content: center; align-items: start; padding: 24px; overflow: auto; }
+.modal { background: #fff; border: 1px solid #999; padding: 16px; width: 460px; max-width: 100%; }
+.modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.modal label { display: flex; flex-direction: column; font-size: 13px; gap: 2px; }
+.modal label.full { grid-column: 1 / -1; }
+
+/* Dashboard */
+.tarjetas { display: flex; gap: 12px; flex-wrap: wrap; }
+.tarjeta { border: 1px solid #ccc; padding: 12px; min-width: 160px; }
+.tarjeta .num { font-size: 24px; font-weight: bold; }
