@@ -1,46 +1,141 @@
 /* ================================================================
-   ESTILO MÍNIMO A PROPÓSITO.
-   Esta capa visual es "sin diseño": solo lo necesario para que sea
-   usable. Reemplazá esto por tu paleta / tipografías de la V1 final
-   (Stitch, landing, etc.) sin tocar la lógica de app.js.
+   GRAFICARTE — Capa de estilos del sistema de taller.
+   Construida sobre brand/tokens.css (identidad de marca).
+   Da estilo a los elementos que genera app.js sin tocar su lógica.
    ================================================================ */
+
 * { box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; margin: 0; color: #111; }
+body {
+  margin: 0;
+  font: var(--ga-body);
+  color: var(--ga-tinta);
+  background: var(--ga-papel);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { font-family: var(--ga-font-titulo); letter-spacing: -0.02em; color: var(--ga-tinta); }
+h2 { font: var(--ga-h2); margin: 0 0 var(--ga-sp-2); }
+h3 { font: var(--ga-h3); margin: var(--ga-sp-3) 0 var(--ga-sp-1); }
 .oculto { display: none !important; }
-.error { color: #b00; min-height: 1em; }
+.error { color: var(--ga-rojo); min-height: 1em; font-size: .875rem; margin: 4px 0 0; }
 
-/* Login */
-.pantalla { display: flex; justify-content: center; padding: 40px 16px; }
-.card { display: flex; flex-direction: column; gap: 10px; width: 320px; max-width: 100%; border: 1px solid #ccc; padding: 20px; }
-.card label { display: flex; flex-direction: column; gap: 4px; }
+/* ---------- LOGIN ---------- */
+.pantalla { min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 24px; }
+.login-card {
+  display: flex; flex-direction: column; gap: 14px;
+  width: 360px; max-width: 100%;
+  background: var(--ga-papel);
+  border: 1px solid var(--ga-linea);
+  border-radius: var(--ga-radio-lg);
+  padding: var(--ga-sp-3);
+}
+.login-logo { height: 46px; align-self: center; margin-bottom: 4px; }
+.login-card h1 { font: var(--ga-h3); text-align: center; margin: 0 0 var(--ga-sp-1); color: var(--ga-texto-2); }
+.login-card .ga-btn-acento { margin-top: 4px; }
 
-/* Barra superior */
-.barra { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid #ccc; }
+/* ---------- BARRA SUPERIOR (estructura = negro) ---------- */
+.barra {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: 0 var(--ga-sp-3); height: 60px;
+  background: var(--ga-negro); color: var(--ga-papel);
+}
+.barra-logo { height: 30px; }
 .barra .spacer { flex: 1; }
+#usuario-actual { font-size: .85rem; color: #cfcccb; }
+.link { border: none; background: none; color: var(--ga-dorado); cursor: pointer; font: 600 .875rem/1 var(--ga-font-cuerpo); }
+.link:hover { color: var(--ga-dorado-hover); text-decoration: underline; }
+
+/* menú de navegación */
 #menu { display: flex; gap: 4px; flex-wrap: wrap; }
-#menu button { border: 1px solid #ccc; background: #f4f4f4; padding: 4px 10px; cursor: pointer; }
-#menu button.activo { background: #ddd; font-weight: bold; }
-.link { border: none; background: none; text-decoration: underline; cursor: pointer; }
+#menu button {
+  border: none; background: transparent; color: #cfcccb;
+  padding: 8px 14px; border-radius: var(--ga-radio-sm);
+  font: 600 .875rem/1 var(--ga-font-cuerpo); cursor: pointer;
+  transition: background .2s, color .2s;
+}
+#menu button:hover { background: #262525; color: #fff; }
+#menu button.activo { background: var(--ga-dorado); color: var(--ga-negro); }
 
-/* Contenido */
-main { padding: 16px; }
-h2 { margin-top: 0; }
-table { border-collapse: collapse; width: 100%; margin-top: 8px; }
-th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 14px; }
-th { background: #f4f4f4; }
-input, select, textarea, button { font: inherit; padding: 4px 6px; }
-.filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-bottom: 8px; }
-.filtros label { display: flex; flex-direction: column; font-size: 13px; }
+/* ---------- CONTENIDO ---------- */
+main { padding: var(--ga-sp-3); max-width: var(--ga-contenedor); margin: 0 auto; }
+
+/* filtros */
+.filtros { display: flex; gap: var(--ga-sp-2); flex-wrap: wrap; align-items: end; margin-bottom: var(--ga-sp-2); }
+.filtros label { display: flex; flex-direction: column; gap: 4px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
+
+/* inputs y selects (genéricos, look de marca) */
+input, select, textarea {
+  font: var(--ga-body); color: var(--ga-tinta);
+  background: var(--ga-papel);
+  border: 1px solid var(--ga-linea); border-radius: var(--ga-radio-sm);
+  padding: 8px 12px; outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--ga-dorado); box-shadow: 0 0 0 3px rgba(246,168,0,.18); }
+
+/* botones (por defecto sobrios; helpers para acción/crítico) */
+button {
+  font: 600 .9rem/1 var(--ga-font-cuerpo); cursor: pointer;
+  padding: 9px 16px; border-radius: var(--ga-radio-sm);
+  border: 1px solid var(--ga-contorno); background: var(--ga-papel); color: var(--ga-tinta);
+  transition: background .2s, color .2s, border-color .2s, box-shadow .25s;
+}
+button:hover { background: var(--ga-panel-2); }
+.btn-primary { background: var(--ga-dorado); color: var(--ga-negro); border-color: var(--ga-dorado); }
+.btn-primary:hover { background: var(--ga-dorado-hover); border-color: var(--ga-dorado-hover); box-shadow: var(--ga-sombra-dorada); }
+.btn-dark { background: var(--ga-negro); color: #fff; border-color: var(--ga-negro); }
+.btn-dark:hover { background: #000; box-shadow: var(--ga-sombra-accion); }
+.btn-danger { background: transparent; color: var(--ga-rojo); border-color: rgba(211,0,8,.4); }
+.btn-danger:hover { background: var(--ga-rojo); color: #fff; border-color: var(--ga-rojo); }
+
+/* ---------- TABLAS ---------- */
+table { width: 100%; border-collapse: collapse; font: var(--ga-body-sm); margin-top: var(--ga-sp-1); background: var(--ga-papel); }
+th {
+  text-align: left; padding: 10px 14px;
+  font: var(--ga-label); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ga-texto-2); border-bottom: 1px solid var(--ga-contorno); white-space: nowrap;
+}
+td { padding: 11px 14px; border-bottom: 1px solid var(--ga-linea); vertical-align: middle; }
+tr:hover td { background: var(--ga-superficie); }
 .acciones { display: flex; gap: 6px; flex-wrap: wrap; }
+.acciones button { padding: 6px 10px; font-size: .8rem; }
 
-/* Formulario (modal simple) */
-.modal-fondo { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; justify-content: center; align-items: start; padding: 24px; overflow: auto; }
-.modal { background: #fff; border: 1px solid #999; padding: 16px; width: 460px; max-width: 100%; }
-.modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.modal label { display: flex; flex-direction: column; font-size: 13px; gap: 2px; }
+/* ---------- BADGES DE ESTADO ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--ga-radio-sm);
+  font: 600 11px/1 var(--ga-font-cuerpo); letter-spacing: .06em; text-transform: uppercase;
+}
+.badge-activo  { background: rgba(246,168,0,.16); color: var(--ga-dorado-texto); }   /* en progreso / activo */
+.badge-neutro  { background: var(--ga-panel-2);   color: var(--ga-texto-2); }         /* pedido / espera / genérico */
+.badge-ok      { background: var(--ga-negro);      color: #fff; }                      /* finalizado / pagado / facturado */
+.badge-alerta  { background: rgba(211,0,8,.10);    color: var(--ga-rojo); }            /* sin cobrar / urgente / rechazado */
+
+/* ---------- DASHBOARD (tarjetas) ---------- */
+.tarjetas { display: flex; gap: var(--ga-sp-2); flex-wrap: wrap; margin-bottom: var(--ga-sp-2); }
+.tarjeta {
+  background: var(--ga-panel); border: 1px solid var(--ga-linea);
+  border-radius: var(--ga-radio-lg); padding: var(--ga-sp-2) var(--ga-sp-3);
+  min-width: 170px; transition: border-color .25s, background .25s;
+}
+.tarjeta:hover { border-color: var(--ga-contorno); background: var(--ga-papel); }
+.tarjeta > div:first-child { font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
+.tarjeta .num { font: 800 2rem/1.1 var(--ga-font-titulo); color: var(--ga-tinta); margin: 6px 0 2px; }
+
+/* ---------- MODAL ---------- */
+.modal-fondo { position: fixed; inset: 0; background: rgba(18,18,18,.5); display: flex; justify-content: center; align-items: flex-start; padding: 40px 24px; overflow: auto; z-index: 50; }
+.modal {
+  background: var(--ga-papel); border: 1px solid var(--ga-contorno);
+  border-radius: var(--ga-radio-lg); padding: var(--ga-sp-3);
+  width: 480px; max-width: 100%;
+}
+.modal h3 { margin: 0 0 var(--ga-sp-2); font: var(--ga-h3); }
+.modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ga-sp-2); }
+.modal label { display: flex; flex-direction: column; gap: 4px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
 .modal label.full { grid-column: 1 / -1; }
+.modal .acciones { margin-top: var(--ga-sp-3); }
 
-/* Dashboard */
-.tarjetas { display: flex; gap: 12px; flex-wrap: wrap; }
-.tarjeta { border: 1px solid #ccc; padding: 12px; min-width: 160px; }
-.tarjeta .num { font-size: 24px; font-weight: bold; }
+@media (max-width: 560px) {
+  .modal .grid { grid-template-columns: 1fr; }
+  .barra { gap: 12px; padding: 0 var(--ga-sp-2); }
+  main { padding: var(--ga-sp-2); }
+}

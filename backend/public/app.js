@@ -24,6 +24,21 @@ const LBL = {
   pago_estado: { pendiente: 'Pendiente', pagado: 'Pagado' },
 };
 
+// Badges de estado con la paleta de marca (dorado=activo, negro=ok, rojo=alerta, gris=neutro)
+function badge(txt, tipo) { return `<span class="badge badge-${tipo}">${txt}</span>`; }
+function badgeEstado(e) {
+  const m = { pedido: 'neutro', en_progreso: 'activo', en_espera: 'alerta', finalizado: 'ok' };
+  return badge(LBL.estado[e] || e, m[e] || 'neutro');
+}
+function badgeCheque(e) {
+  const m = { pendiente: 'neutro', cobrado: 'ok', depositado: 'ok', rechazado: 'alerta' };
+  return badge(LBL.cheque_estado[e] || e, m[e] || 'neutro');
+}
+function badgePago(e) {
+  const m = { pendiente: 'alerta', pagado: 'ok' };
+  return badge(LBL.pago_estado[e] || e, m[e] || 'neutro');
+}
+
 async function api(method, path, body) {
   const res = await fetch('/api' + path, {
     method,
@@ -150,7 +165,7 @@ async function vistaTrabajos() {
       <label>Cobro <select id="f-pagado"><option value="">Todos</option><option value="false">No pagado</option><option value="true">Pagado</option></select></label>
       <label>Facturación <select id="f-facturado"><option value="">Todos</option><option value="false">No facturado</option><option value="true">Facturado</option></select></label>
       <label>Buscar <input id="f-buscar" placeholder="cliente o descripción" /></label>
-      ${puedeEditar() ? '<button id="btn-nuevo-trabajo">+ Nuevo trabajo</button>' : ''}
+      ${puedeEditar() ? '<button id="btn-nuevo-trabajo" class="btn-primary">+ Nuevo trabajo</button>' : ''}
     </div>
     <div id="lista-trabajos"></div>
   `;
@@ -178,12 +193,12 @@ async function cargarTrabajos() {
       <td>${esc(t.cliente)}${t.origen === 'ia' && !t.revisado ? ' <em>(IA sin revisar)</em>' : ''}</td>
       <td>${esc(t.descripcion)}</td>
       <td>${LBL.disciplina[t.disciplina] || t.disciplina}</td>
-      <td>${LBL.estado[t.estado]}</td>
-      <td>${t.estado === 'finalizado' ? (t.pagado ? 'Pagado' : 'No pagado') : '-'}</td>
-      <td>${t.estado === 'finalizado' ? (t.facturado ? 'Facturado' : 'No facturado') : '-'}</td>
+      <td>${badgeEstado(t.estado)}</td>
+      <td>${t.estado === 'finalizado' ? (t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')) : '-'}</td>
+      <td>${t.estado === 'finalizado' ? (t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')) : '-'}</td>
       <td>${money(t.precio)}</td>
       <td>${fecha(t.fecha_ingreso)}</td>
-      <td class="acciones">${puedeEditar() ? `<button data-edit="${t.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${t.id}">Eliminar</button>` : ''}</td>
+      <td class="acciones">${puedeEditar() ? `<button data-edit="${t.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${t.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}
     </tbody></table>` : '<p>No hay trabajos con esos filtros.</p>';
 
@@ -230,7 +245,7 @@ async function vistaCheques() {
     <div class="filtros">
       <label>Tipo <select id="cf-tipo"><option value="">Todos</option>${opts(LBL.cheque_tipo)}</select></label>
       <label>Estado <select id="cf-estado"><option value="">Todos</option>${opts(LBL.cheque_estado)}</select></label>
-      ${puedeEditar() ? '<button id="btn-nuevo-cheque">+ Nuevo cheque</button>' : ''}
+      ${puedeEditar() ? '<button id="btn-nuevo-cheque" class="btn-primary">+ Nuevo cheque</button>' : ''}
     </div>
     <div id="lista-cheques"></div>`;
   ['cf-tipo', 'cf-estado'].forEach((id) => $('#' + id).addEventListener('change', cargarCheques));
@@ -248,8 +263,8 @@ async function cargarCheques() {
     ${filas.map((c) => `<tr>
       <td>${LBL.cheque_tipo[c.tipo]}${c.origen === 'ia' && !c.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(c.numero)}</td><td>${esc(c.banco)}</td>
       <td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td><td>${fecha(c.fecha_cobro)}</td>
-      <td>${LBL.cheque_estado[c.estado]}</td>
-      <td class="acciones">${puedeEditar() ? `<button data-edit="${c.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${c.id}">Eliminar</button>` : ''}</td>
+      <td>${badgeCheque(c.estado)}</td>
+      <td class="acciones">${puedeEditar() ? `<button data-edit="${c.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${c.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}</tbody></table>` : '<p>Sin cheques.</p>';
   $('#lista-cheques').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formCheque(filas.find((c) => c.id == b.dataset.edit)));
   $('#lista-cheques').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('¿Eliminar cheque?')) { await api('DELETE', '/cheques/' + b.dataset.del); cargarCheques(); } });
@@ -282,7 +297,7 @@ async function vistaPagos() {
     <h2>Pagos de servicios</h2>
     <div class="filtros">
       <label>Estado <select id="pf-estado"><option value="">Todos</option>${opts(LBL.pago_estado)}</select></label>
-      ${puedeEditar() ? '<button id="btn-nuevo-pago">+ Nuevo pago</button>' : ''}
+      ${puedeEditar() ? '<button id="btn-nuevo-pago" class="btn-primary">+ Nuevo pago</button>' : ''}
     </div>
     <div id="lista-pagos"></div>`;
   $('#pf-estado').addEventListener('change', cargarPagos);
@@ -298,8 +313,8 @@ async function cargarPagos() {
     <table><thead><tr><th>Concepto</th><th>Período</th><th>Vence</th><th>Importe</th><th>Estado</th><th></th></tr></thead><tbody>
     ${filas.map((p) => `<tr>
       <td>${esc(p.concepto)}${p.origen === 'ia' && !p.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(p.periodo)}</td><td>${fecha(p.fecha_vencimiento)}</td>
-      <td>${money(p.importe)}</td><td>${LBL.pago_estado[p.estado]}</td>
-      <td class="acciones">${puedeEditar() ? `<button data-edit="${p.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${p.id}">Eliminar</button>` : ''}</td>
+      <td>${money(p.importe)}</td><td>${badgePago(p.estado)}</td>
+      <td class="acciones">${puedeEditar() ? `<button data-edit="${p.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${p.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}</tbody></table>` : '<p>Sin pagos cargados.</p>';
   $('#lista-pagos').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formPago(filas.find((p) => p.id == b.dataset.edit)));
   $('#lista-pagos').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('¿Eliminar pago?')) { await api('DELETE', '/pagos/' + b.dataset.del); cargarPagos(); } });
@@ -327,7 +342,7 @@ function formPago(p, onDone) {
 async function vistaUsuarios() {
   $('#contenido').innerHTML = `
     <h2>Usuarios</h2>
-    <div class="filtros"><button id="btn-nuevo-usuario">+ Nuevo usuario</button></div>
+    <div class="filtros"><button id="btn-nuevo-usuario" class="btn-primary">+ Nuevo usuario</button></div>
     <div id="lista-usuarios"></div>`;
   $('#btn-nuevo-usuario').addEventListener('click', () => formUsuario());
   cargarUsuarios();
@@ -339,7 +354,7 @@ async function cargarUsuarios() {
     <table><thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Activo</th><th></th></tr></thead><tbody>
     ${filas.map((u) => `<tr>
       <td>${esc(u.nombre)}</td><td>${esc(u.email)}</td><td>${esc(u.rol)}</td><td>${u.activo ? 'Sí' : 'No'}</td>
-      <td class="acciones"><button data-edit="${u.id}">Editar</button>${u.id != USER.id ? `<button data-del="${u.id}">Eliminar</button>` : ''}</td>
+      <td class="acciones"><button data-edit="${u.id}">Editar</button>${u.id != USER.id ? `<button data-del="${u.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}</tbody></table>`;
   $('#lista-usuarios').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formUsuario(filas.find((u) => u.id == b.dataset.edit)));
   $('#lista-usuarios').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('¿Eliminar usuario?')) { await api('DELETE', '/usuarios/' + b.dataset.del); cargarUsuarios(); } });
@@ -378,9 +393,9 @@ async function vistaBandeja() {
 
 function accionesBandeja(tipo, id) {
   if (!puedeEditar()) return '';
-  return `<button data-conf="${tipo}:${id}">Confirmar</button>
+  return `<button data-conf="${tipo}:${id}" class="btn-primary">Confirmar</button>
           <button data-editb="${tipo}:${id}">Editar</button>
-          <button data-desc="${tipo}:${id}">Descartar</button>`;
+          <button data-desc="${tipo}:${id}" class="btn-danger">Descartar</button>`;
 }
 
 async function cargarBandeja() {
@@ -448,7 +463,7 @@ function abrirModal(titulo, htmlCampos, onSubmit) {
   fondo.id = 'modal-fondo';
   fondo.innerHTML = `<form class="modal"><h3>${esc(titulo)}</h3>${htmlCampos}
     <p class="error" id="modal-error"></p>
-    <div class="acciones"><button type="submit">Guardar</button><button type="button" id="modal-cancelar">Cancelar</button></div></form>`;
+    <div class="acciones"><button type="submit" class="btn-primary">Guardar</button><button type="button" id="modal-cancelar">Cancelar</button></div></form>`;
   document.body.appendChild(fondo);
   fondo.querySelector('#modal-cancelar').onclick = cerrarModal;
   fondo.querySelector('form').addEventListener('submit', async (e) => {

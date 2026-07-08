@@ -1,0 +1,163 @@
+/* ============================================================
+   GRAFICARTE — TOKENS DE DISEÑO
+   Sistema "Atelier Precise" (adaptado, sin el azul primario)
+   Usar este archivo tal cual en cualquier interfaz interna:
+   <link rel="stylesheet" href="tokens.css">
+   ============================================================ */
+
+:root{
+  /* ---------- COLOR / MARCA ---------- */
+  --ga-rojo:        #D30008;  /* rojo del logo: énfasis alto, errores, indicadores críticos */
+  --ga-rojo-vivo:   #ff4737;  /* variante sobre fondos oscuros */
+  --ga-rojo-oscuro: #520001;  /* raro: fondos de alerta crítica */
+
+  --ga-dorado:        #F6A800; /* acción principal: botones, estados activos, focus */
+  --ga-dorado-hover:  #feaf10;
+  --ga-dorado-suave:  #ffddb0; /* fondos de aviso/destacado */
+  --ga-dorado-texto:  #805600; /* dorado legible para texto/labels sobre claro */
+
+  /* ---------- COLOR / NEUTROS ---------- */
+  --ga-negro:      #121212;   /* estructura: header, footer, botón primario */
+  --ga-tinta:      #1c1b1b;   /* texto principal */
+  --ga-texto-2:    #42474c;   /* texto secundario */
+  --ga-papel:      #FFFEF8;   /* fondo base de página */
+  --ga-superficie: #fcf9f8;   /* fondo alternativo de sección */
+  --ga-panel:      #f6f3f2;   /* fondo de cards/paneles */
+  --ga-panel-2:    #ebe7e7;   /* hover de paneles, fondos hundidos */
+  --ga-linea:      #e5e2e1;   /* bordes por defecto */
+  --ga-contorno:   #c2c7cd;   /* bordes enfatizados/hover */
+
+  /* ---------- ESTADOS (sistema interno) ---------- */
+  --ga-ok:      var(--ga-dorado);       /* éxito/activo: la paleta no tiene verde a propósito */
+  --ga-alerta:  var(--ga-dorado-suave); /* fondo de aviso */
+  --ga-error:   var(--ga-rojo);
+  --ga-neutro:  var(--ga-texto-2);
+
+  /* ---------- TIPOGRAFÍA ---------- */
+  /* Títulos: Hanken Grotesk (700/800, tracking negativo)
+     Cuerpo:  Inter (300/400/500/600)
+     https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap */
+  --ga-font-titulo: 'Hanken Grotesk', sans-serif;
+  --ga-font-cuerpo: 'Inter', sans-serif;
+
+  --ga-display: 800 clamp(2.5rem,5vw,4.5rem)/1.1 var(--ga-font-titulo);  /* hero */
+  --ga-h1:      700 clamp(2rem,3.6vw,3rem)/1.2 var(--ga-font-titulo);
+  --ga-h2:      700 1.6rem/1.3 var(--ga-font-titulo);
+  --ga-h3:      600 1.25rem/1.4 var(--ga-font-titulo);
+  --ga-body-lg: 300 1.125rem/1.6 var(--ga-font-cuerpo);
+  --ga-body:    400 1rem/1.6 var(--ga-font-cuerpo);
+  --ga-body-sm: 400 .875rem/1.55 var(--ga-font-cuerpo);
+  /* labels/overlines siempre: 12px 600 uppercase tracking .1em */
+  --ga-label:   600 12px/1 var(--ga-font-cuerpo);
+
+  /* ---------- FORMA ---------- */
+  --ga-radio-sm: 4px;   /* botones, inputs, chips */
+  --ga-radio-lg: 8px;   /* cards, paneles, modales */
+  /* imágenes/portfolio: sin radio (0) a propósito */
+
+  /* ---------- ESPACIADO ---------- */
+  --ga-sp-1: 8px;
+  --ga-sp-2: 16px;
+  --ga-sp-3: 32px;
+  --ga-sp-4: 64px;
+  --ga-contenedor: 1280px;
+  /* landing: separación de secciones 120px; sistema interno: usar 32–64px */
+
+  /* ---------- ELEVACIÓN ----------
+     Regla: profundidad con bordes de 1px y capas tonales, NO sombras.
+     Única excepción: hover de acciones primarias. */
+  --ga-sombra-accion: 0 10px 30px -8px rgba(18,18,18,.45);
+  --ga-sombra-dorada: 0 10px 30px -8px rgba(246,168,0,.55);
+}
+
+/* ============================================================
+   COMPONENTES BASE (opcionales, listos para el sistema interno)
+   ============================================================ */
+
+.ga-body{
+  font: var(--ga-body);
+  color: var(--ga-tinta);
+  background: var(--ga-papel);
+  -webkit-font-smoothing: antialiased;
+}
+
+.ga-label{
+  font: var(--ga-label);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ga-dorado-texto);
+}
+
+/* --- botones: 4 variantes, siempre radio 4px, sin borde salvo ghost --- */
+.ga-btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:10px 20px; border-radius:var(--ga-radio-sm);
+  font:600 .92rem/1 var(--ga-font-cuerpo);
+  border:none; cursor:pointer; text-decoration:none;
+  transition:background .2s, color .2s, border-color .2s, box-shadow .25s;
+}
+.ga-btn-primario{ background:var(--ga-negro); color:#fff; }
+.ga-btn-primario:hover{ background:#000; box-shadow:var(--ga-sombra-accion); }
+.ga-btn-acento{ background:var(--ga-dorado); color:var(--ga-negro); }
+.ga-btn-acento:hover{ background:var(--ga-dorado-hover); box-shadow:var(--ga-sombra-dorada); }
+.ga-btn-ghost{ background:transparent; color:var(--ga-tinta); border:1px solid var(--ga-negro); }
+.ga-btn-ghost:hover{ background:var(--ga-negro); color:var(--ga-papel); }
+.ga-btn-critico{ background:var(--ga-rojo); color:#fff; } /* solo acciones destructivas/urgentes */
+.ga-btn-critico:hover{ background:#b00007; }
+
+/* --- cards/paneles: capa tonal + borde, nunca sombra --- */
+.ga-card{
+  background:var(--ga-panel);
+  border:1px solid var(--ga-linea);
+  border-radius:var(--ga-radio-lg);
+  padding:var(--ga-sp-3);
+  transition:border-color .25s, background .25s;
+}
+.ga-card:hover{ border-color:var(--ga-contorno); background:var(--ga-papel); }
+
+/* --- inputs: borde 1px, focus dorado --- */
+.ga-input{
+  width:100%; padding:10px 14px;
+  font:var(--ga-body); color:var(--ga-tinta);
+  background:var(--ga-papel);
+  border:1px solid var(--ga-linea);
+  border-radius:var(--ga-radio-sm);
+  outline:none; transition:border-color .2s, box-shadow .2s;
+}
+.ga-input:focus{ border-color:var(--ga-dorado); box-shadow:0 0 0 3px rgba(246,168,0,.18); }
+.ga-input-label{ display:block; margin-bottom:6px; }
+
+/* --- badges de estado --- */
+.ga-badge{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px; border-radius:var(--ga-radio-sm);
+  font:600 12px/1 var(--ga-font-cuerpo);
+  letter-spacing:.06em; text-transform:uppercase;
+}
+.ga-badge-activo{ background:rgba(246,168,0,.15); color:var(--ga-dorado-texto); }
+.ga-badge-error{  background:rgba(211,0,8,.1);   color:var(--ga-rojo); }
+.ga-badge-neutro{ background:var(--ga-panel-2);  color:var(--ga-texto-2); }
+
+/* --- tabla sobria para sistema interno --- */
+.ga-tabla{ width:100%; border-collapse:collapse; font:var(--ga-body-sm); }
+.ga-tabla th{
+  text-align:left; padding:10px 14px;
+  font:var(--ga-label); letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ga-texto-2); border-bottom:1px solid var(--ga-contorno);
+}
+.ga-tabla td{ padding:12px 14px; border-bottom:1px solid var(--ga-linea); }
+.ga-tabla tr:hover td{ background:var(--ga-superficie); }
+
+/* --- patrón topográfico estático como fondo ---
+   Usar SOLO como decoración en cabeceras, vacíos o paneles hero.
+   Nunca detrás de formularios o texto denso. */
+.ga-topo-claro{
+  background-color:var(--ga-superficie);
+  background-image:url('patrones/topografia-clara.svg');
+  background-size:cover; background-position:center;
+}
+.ga-topo-oscuro{
+  background-color:var(--ga-negro);
+  background-image:url('patrones/topografia-oscura.svg');
+  background-size:cover; background-position:center;
+}

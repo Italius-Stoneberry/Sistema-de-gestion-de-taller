@@ -3,17 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gestión de Taller</title>
+  <title>GraficArte — Gestión de Taller</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/brand/tokens.css" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
+<body class="ga-body">
   <!-- ================== LOGIN ================== -->
-  <section id="vista-login" class="pantalla">
-    <form id="form-login" class="card">
+  <section id="vista-login" class="pantalla ga-topo-claro">
+    <form id="form-login" class="card login-card">
+      <img class="login-logo" src="/brand/logo-negro.svg" alt="GraficArte" />
       <h1>Gestión de Taller</h1>
-      <label>Email <input type="email" id="login-email" required /></label>
-      <label>Contraseña <input type="password" id="login-password" required /></label>
-      <button type="submit">Ingresar</button>
+      <label class="ga-input-label">Email
+        <input class="ga-input" type="email" id="login-email" required />
+      </label>
+      <label class="ga-input-label">Contraseña
+        <input class="ga-input" type="password" id="login-password" required />
+      </label>
+      <button type="submit" class="ga-btn ga-btn-acento">Ingresar</button>
       <p id="login-error" class="error"></p>
     </form>
   </section>
@@ -21,7 +29,7 @@
   <!-- ================== APP ================== -->
   <div id="app" class="oculto">
     <header class="barra">
-      <strong>Gestión de Taller</strong>
+      <img class="barra-logo" src="/brand/logo-blanco.svg" alt="GraficArte" />
       <nav id="menu"></nav>
       <span class="spacer"></span>
       <span id="usuario-actual"></span>
