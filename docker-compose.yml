@@ -47,4 +47,8 @@ services:
       # Se accede desde la red del taller/casa y por Tailscale: http://<ip-del-nas>:3000
       - "3000:3000"
     volumes:
-      # Fr
+      # Frontend en vivo: cambios visuales con solo `git pull` (sin reconstruir la imagen)
+      - ./backend/public:/app/public
+
+volumes:
+  db_data:
