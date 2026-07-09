@@ -1,0 +1,142 @@
+{
+  "name": "Taller — WhatsApp a Bandeja (Etapa 2)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "waha",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "w1",
+      "name": "WhatsApp (WAHA)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "waha"
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = ($json.body && $json.body.payload) || {};\nconst texto = (p.body || \"\").trim();\n// Ignorar mensajes propios o sin texto (los audios los sumamos más adelante con Whisper)\nif (p.fromMe || !texto) { return []; }\nconst reglas = \"Extra\\u00e9 datos de un mensaje de un taller gr\\u00e1fico y devolv\\u00e9 SOLO un JSON v\\u00e1lido, sin explicaciones.\\nClaves: empresa, contacto, descripcion, disciplina (uno de: laser, serigrafia, ploteo), precio (entero en pesos, 0 si no se menciona).\\nRegla 'X de Y': X es el contacto (persona), Y es la empresa. Ej: 'marianela de andreu' => contacto 'Marianela', empresa 'Andreu'.\\nJerga argentina de plata: luca/lucas = miles (80 lucas = 80000); palo = millon; gamba = 100.\";\nconst prompt = reglas + \"\\nMensaje: \" + texto;\nreturn [{ json: { prompt, from: p.from || \"\" } }];"
+      },
+      "id": "w2",
+      "name": "Armar pedido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"qwen3:8b\", stream: false, format: \"json\", prompt: $json.prompt }) }}",
+        "options": {}
+      },
+      "id": "w3",
+      "name": "Ollama — extraer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let d = {};\ntry { d = JSON.parse($input.first().json.response || \"{}\"); } catch (e) { d = {}; }\nconst from = ($(\"Armar pedido\").first().json.from || \"\").replace(\"@c.us\",\"\");\nconst nombre = d.contacto || d.empresa || \"Sin nombre\";\nconst disc = [\"laser\",\"serigrafia\",\"ploteo\"].includes(d.disciplina) ? d.disciplina : \"laser\";\nreturn [{ json: {\n  cliente: d.empresa ? (nombre + \" (\" + d.empresa + \")\") : nombre,\n  empresa_nombre: d.empresa || \"\",\n  contacto_nombre: d.contacto || \"\",\n  descripcion: d.descripcion || \"\",\n  disciplina: disc,\n  precio: Number(d.precio) || 0,\n  origen_ref: \"WhatsApp \" + from\n} }];"
+      },
+      "id": "w4",
+      "name": "Parsear JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/ingesta/trabajo",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "PEGA_TU_INGEST_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "w5",
+      "name": "Crear borrador en la app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Armar pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar pedido": {
+      "main": [
+        [
+          {
+            "node": "Ollama — extraer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama — extraer": {
+      "main": [
+        [
+          {
+            "node": "Parsear JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear JSON": {
+      "main": [
+        [
+          {
+            "node": "Crear borrador en la app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
