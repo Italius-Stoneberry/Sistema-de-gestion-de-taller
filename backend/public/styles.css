@@ -134,8 +134,47 @@ tr:hover td { background: var(--ga-superficie); }
 .modal label.full { grid-column: 1 / -1; }
 .modal .acciones { margin-top: var(--ga-sp-3); }
 
-@media (max-width: 560px) {
-  .modal .grid { grid-template-columns: 1fr; }
-  .barra { gap: 12px; padding: 0 var(--ga-sp-2); }
+/* ================= RESPONSIVE / MÓVIL ================= */
+@media (max-width: 720px) {
+  /* Barra: logo + usuario arriba, menú deslizable a lo ancho debajo */
+  .barra { height: auto; padding: 8px 12px; gap: 8px 12px; }
+  .barra-logo { height: 24px; }
+  #usuario-actual { font-size: .72rem; }
+  #menu {
+    order: 3; width: 100%;
+    flex-wrap: nowrap; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; padding-bottom: 4px;
+  }
+  #menu button { flex: 0 0 auto; }
+
   main { padding: var(--ga-sp-2); }
+
+  /* Filtros apilados y a todo el ancho */
+  .filtros { flex-direction: column; align-items: stretch; gap: 10px; }
+  .filtros label { width: 100%; }
+  .filtros input, .filtros select, .filtros button { width: 100%; }
+
+  /* Tablas de datos: scroll horizontal en vez de aplastarse */
+  #lista-trabajos, #lista-cheques, #lista-pagos, #lista-usuarios, #lista-bandeja {
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  #lista-trabajos table, #lista-cheques table, #lista-pagos table,
+  #lista-usuarios table, #lista-bandeja table { min-width: 620px; }
+
+  /* Tarjetas del dashboard: 2 por fila */
+  .tarjetas { gap: 10px; }
+  .tarjeta { flex: 1 1 calc(50% - 5px); min-width: 0; padding: 12px 16px; }
+  .tarjeta .num { font-size: 1.7rem; }
+
+  /* Botones un poco más grandes para el dedo */
+  button { padding: 10px 16px; }
+  .acciones button { padding: 8px 12px; }
+}
+
+@media (max-width: 520px) {
+  .modal .grid { grid-template-columns: 1fr; }
+  .modal { padding: var(--ga-sp-2); }
+  .modal-fondo { padding: 16px 10px; }
+  .tarjeta { flex: 1 1 100%; }
+  .login-card { padding: var(--ga-sp-2); }
 }
