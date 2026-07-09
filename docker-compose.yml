@@ -36,15 +36,15 @@ services:
       DB_NAME: ${DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       INGEST_API_KEY: ${INGEST_API_KEY}
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen3:8b
       ADMIN_NOMBRE: ${ADMIN_NOMBRE}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # Se accede desde la red del taller/casa y por Tailscale: http://<ip-del-nas>:3000
       - "3000:3000"
     volumes:
-      # Frontend en vivo: cambios visuales con solo `git pull` (sin reconstruir la imagen)
-      - ./backend/public:/app/public
-
-volumes:
-  db_data:
+      # Fr

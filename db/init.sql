@@ -135,3 +135,12 @@ CREATE INDEX IF NOT EXISTS idx_contactos_empresa ON contactos(empresa_id);
 
 ALTER TABLE trabajos ADD COLUMN IF NOT EXISTS empresa_id  INTEGER REFERENCES empresas(id)  ON DELETE SET NULL;
 ALTER TABLE trabajos ADD COLUMN IF NOT EXISTS contacto_id INTEGER REFERENCES contactos(id) ON DELETE SET NULL;
+
+
+-- ========== CONVERSACIONES DEL ASISTENTE (v1.4) ==========
+CREATE TABLE IF NOT EXISTS conversaciones (
+  chat_id        TEXT PRIMARY KEY,
+  estado         TEXT NOT NULL DEFAULT 'idle',
+  datos          JSONB NOT NULL DEFAULT '{}',
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
