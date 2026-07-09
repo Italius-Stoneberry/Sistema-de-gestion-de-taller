@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
   );
   const porDisciplina = await query(
     `SELECT disciplina, COUNT(*)::int AS n FROM trabajos
-     WHERE estado <> 'finalizado' GROUP BY disciplina`
+     WHERE estado IN ('pedido','en_progreso','en_espera') GROUP BY disciplina`
   );
   const finalizados = await query(
     `SELECT

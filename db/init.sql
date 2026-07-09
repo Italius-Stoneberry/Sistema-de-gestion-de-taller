@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS trabajos (
   disciplina             TEXT NOT NULL
                          CHECK (disciplina IN ('laser','serigrafia','ploteo')),
   estado                 TEXT NOT NULL DEFAULT 'pedido'
-                         CHECK (estado IN ('pedido','en_progreso','en_espera','finalizado')),
+                         CHECK (estado IN ('cotizar','presupuestado','pedido','en_progreso','en_espera','finalizado')),
   -- Subestados de "finalizado": dos ejes independientes
   pagado                 BOOLEAN NOT NULL DEFAULT FALSE,
   facturado              BOOLEAN NOT NULL DEFAULT FALSE,

@@ -7,7 +7,7 @@ const router = Router();
 router.use(requiereAuth);
 
 const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
-const ESTADOS = ['pedido', 'en_progreso', 'en_espera', 'finalizado'];
+const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera', 'finalizado'];
 
 // Resuelve empresa y contacto a partir de ids o nombres (los crea si no existen).
 async function resolverCliente(b, origen = 'manual') {
@@ -44,7 +44,7 @@ router.get('/', async (req, res) => {
      LEFT JOIN contactos c ON c.id = t.contacto_id
      ${where}
      ORDER BY
-       CASE t.estado WHEN 'en_progreso' THEN 0 WHEN 'pedido' THEN 1 WHEN 'en_espera' THEN 2 ELSE 3 END,
+       CASE t.estado WHEN 'cotizar' THEN 0 WHEN 'presupuestado' THEN 1 WHEN 'pedido' THEN 2 WHEN 'en_progreso' THEN 3 WHEN 'en_espera' THEN 4 ELSE 5 END,
        t.fecha_ingreso DESC, t.id DESC`,
     vals
   );

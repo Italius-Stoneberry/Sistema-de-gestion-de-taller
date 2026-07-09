@@ -18,7 +18,7 @@ const fecha = (d) => (d ? String(d).slice(0, 10) : '');
 
 const LBL = {
   disciplina: { laser: 'Láser', serigrafia: 'Serigrafía', ploteo: 'Ploteo/Cartelería' },
-  estado: { pedido: 'Pedido', en_progreso: 'En progreso', en_espera: 'En espera', finalizado: 'Finalizado' },
+  estado: { cotizar: 'Por cotizar', presupuestado: 'Presupuestado', pedido: 'Pedido', en_progreso: 'En progreso', en_espera: 'En espera', finalizado: 'Finalizado' },
   cheque_tipo: { recibido: 'Recibido', emitido: 'Emitido' },
   cheque_estado: { pendiente: 'Pendiente', cobrado: 'Cobrado', depositado: 'Depositado', rechazado: 'Rechazado' },
   pago_estado: { pendiente: 'Pendiente', pagado: 'Pagado' },
@@ -27,7 +27,7 @@ const LBL = {
 // Badges de estado con la paleta de marca (dorado=activo, negro=ok, rojo=alerta, gris=neutro)
 function badge(txt, tipo) { return `<span class="badge badge-${tipo}">${txt}</span>`; }
 function badgeEstado(e) {
-  const m = { pedido: 'neutro', en_progreso: 'activo', en_espera: 'alerta', finalizado: 'ok' };
+  const m = { cotizar: 'neutro', presupuestado: 'activo', pedido: 'neutro', en_progreso: 'activo', en_espera: 'alerta', finalizado: 'ok' };
   return badge(LBL.estado[e] || e, m[e] || 'neutro');
 }
 function badgeCheque(e) {
@@ -126,6 +126,8 @@ async function vistaDashboard() {
   $('#contenido').innerHTML = `
     <h2>Resumen</h2>
     <div class="tarjetas">
+      <div class="tarjeta"><div>Por cotizar</div><div class="num">${estados.cotizar || 0}</div></div>
+      <div class="tarjeta"><div>Presupuestado</div><div class="num">${estados.presupuestado || 0}</div></div>
       <div class="tarjeta"><div>Pedidos</div><div class="num">${estados.pedido || 0}</div></div>
       <div class="tarjeta"><div>En progreso</div><div class="num">${estados.en_progreso || 0}</div></div>
       <div class="tarjeta"><div>En espera</div><div class="num">${estados.en_espera || 0}</div></div>
