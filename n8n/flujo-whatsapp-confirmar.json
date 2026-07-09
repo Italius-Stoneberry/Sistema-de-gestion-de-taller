@@ -1,0 +1,293 @@
+{
+  "name": "Taller — WhatsApp + Confirmación (Etapa 2b)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "waha",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "WhatsApp (WAHA)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        380
+      ],
+      "webhookId": "waha"
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = ($json.body && $json.body.payload) || {};\nconst texto = (p.body || \"\").trim();\nconst chatId = p.from || \"\";\nconst from = chatId.replace(\"@c.us\", \"\");\n\n// ===== NÚMEROS AUTORIZADOS: poné los que pueden cargar (solo dígitos, con código de país) =====\nconst autorizados = [\"5493510000001\", \"5493510000002\", \"5493510000003\", \"5493510000004\"];\nif (p.fromMe || !texto || !autorizados.includes(from)) { return []; }\n\n// ¿Es una respuesta de confirmación? (ok / si / dale / listo / no [+ número])\nconst m = texto.match(/^\\s*(ok|si|sí|dale|listo|no)\\s*#?(\\d+)?/i);\nif (m) {\n  const accion = (m[1].toLowerCase() === \"no\") ? \"descartar\" : \"confirmar\";\n  const id = m[2] ? Number(m[2]) : null;\n  return [{ json: { ruta: \"comando\", accion, id, chatId } }];\n}\n\nconst reglas = \"Extra\\u00e9 datos de un mensaje de un taller gr\\u00e1fico y devolv\\u00e9 SOLO un JSON v\\u00e1lido, sin explicaciones.\\nClaves: empresa, contacto, descripcion, disciplina (uno de: laser, serigrafia, ploteo), precio (entero en pesos, 0 si no se menciona).\\nRegla 'X de Y': X es el contacto (persona), Y es la empresa. Ej: 'marianela de andreu' => contacto 'Marianela', empresa 'Andreu'.\\nJerga argentina de plata: luca/lucas = miles (80 lucas = 80000); palo = millon; gamba = 100.\";\nconst prompt = reglas + \"\\nMensaje: \" + texto;\nreturn [{ json: { ruta: \"nuevo\", prompt, from, chatId } }];"
+      },
+      "id": "cl",
+      "name": "Clasificar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ruta }}",
+              "rightValue": "comando",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "iff",
+      "name": "¿Comando?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        620,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/ingesta/confirmar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "PEGA_TU_INGEST_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ accion: $json.accion, id: $json.id }) }}",
+        "options": {}
+      },
+      "id": "Confirmar_en_app",
+      "name": "Confirmar en app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "6211e57bdd66ed7f55a2410ca84ca7d8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: \"default\", chatId: $(\"Clasificar\").first().json.chatId, text: ($json.ok ? (\"✅ \" + $json.accion + \" #\" + $json.id + \" (\" + $json.cliente + \")\") : (\"⚠️ No se pudo: \" + ($json.error||\"\"))) }) }}",
+        "options": {}
+      },
+      "id": "Avisar_resultado",
+      "name": "Avisar resultado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1060,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"qwen3:8b\", stream: false, format: \"json\", prompt: $json.prompt }) }}",
+        "options": {}
+      },
+      "id": "ol",
+      "name": "Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let d = {};\ntry { d = JSON.parse($input.first().json.response || \"{}\"); } catch (e) { d = {}; }\nconst from = $(\"Clasificar\").first().json.from || \"\";\nconst nombre = d.contacto || d.empresa || \"Sin nombre\";\nconst disc = [\"laser\",\"serigrafia\",\"ploteo\"].includes(d.disciplina) ? d.disciplina : \"laser\";\nreturn [{ json: {\n  cliente: d.empresa ? (nombre + \" (\" + d.empresa + \")\") : nombre,\n  empresa_nombre: d.empresa || \"\",\n  contacto_nombre: d.contacto || \"\",\n  descripcion: d.descripcion || \"\",\n  disciplina: disc,\n  precio: Number(d.precio) || 0,\n  origen_ref: \"WhatsApp \" + from\n} }];"
+      },
+      "id": "pa",
+      "name": "Parsear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/ingesta/trabajo",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "PEGA_TU_INGEST_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "Crear_borrador",
+      "name": "Crear borrador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "6211e57bdd66ed7f55a2410ca84ca7d8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: \"default\", chatId: $(\"Clasificar\").first().json.chatId, text: (\"🆕 Anoté #\" + $json.id + \": \" + $json.cliente + \" — \" + ($json.descripcion||\"\") + \" — $\" + $json.precio + \". Respondé: ok \" + $json.id + \" para confirmar, o no \" + $json.id + \" para descartar.\") }) }}",
+        "options": {}
+      },
+      "id": "Pedir_confirmación",
+      "name": "Pedir confirmación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Clasificar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar": {
+      "main": [
+        [
+          {
+            "node": "¿Comando?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Comando?": {
+      "main": [
+        [
+          {
+            "node": "Confirmar en app",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar en app": {
+      "main": [
+        [
+          {
+            "node": "Avisar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama": {
+      "main": [
+        [
+          {
+            "node": "Parsear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear": {
+      "main": [
+        [
+          {
+            "node": "Crear borrador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear borrador": {
+      "main": [
+        [
+          {
+            "node": "Pedir confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

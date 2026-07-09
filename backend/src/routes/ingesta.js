@@ -58,4 +58,27 @@ router.post('/pago', async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// POST /api/ingesta/confirmar  -> confirmar o descartar un borrador desde WhatsApp (n8n)
+// body: { accion: "confirmar"|"descartar", id? }  (si no hay id, toma el borrador IA más reciente)
+router.post('/confirmar', async (req, res) => {
+  const b = req.body || {};
+  const accion = b.accion === 'descartar' ? 'descartar' : 'confirmar';
+  let id = b.id ? Number(b.id) : null;
+  if (!id) {
+    const r = await query("SELECT id FROM trabajos WHERE revisado = FALSE AND origen = 'ia' ORDER BY creado_en DESC LIMIT 1");
+    if (!r.rows[0]) return res.status(404).json({ error: 'No hay borradores pendientes', accion, id: null });
+    id = r.rows[0].id;
+  }
+  if (accion === 'descartar') {
+    const { rows } = await query('DELETE FROM trabajos WHERE id = $1 AND revisado = FALSE RETURNING cliente', [id]);
+    if (!rows[0]) return res.status(404).json({ error: 'No es un borrador pendiente', accion, id });
+    await audit(null, 'descartar', 'trabajo', id, { via: 'whatsapp' });
+    return res.json({ ok: true, accion: 'descartado', id, cliente: rows[0].cliente });
+  }
+  const { rows } = await query('UPDATE trabajos SET revisado = TRUE, actualizado_en = now() WHERE id = $1 RETURNING cliente', [id]);
+  if (!rows[0]) return res.status(404).json({ error: 'No encontrado', accion, id });
+  await audit(null, 'confirmar', 'trabajo', id, { via: 'whatsapp' });
+  return res.json({ ok: true, accion: 'confirmado', id, cliente: rows[0].cliente });
+});
+
 export default router;

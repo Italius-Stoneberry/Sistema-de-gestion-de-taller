@@ -180,3 +180,13 @@ tr:hover td { background: var(--ga-superficie); }
   .tarjeta { flex: 1 1 100%; }
   .login-card { padding: var(--ga-sp-2); }
 }
+
+/* ---------- Acciones de un toque (fluidez) ---------- */
+.clic { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--ga-radio-sm); }
+.clic:hover { filter: brightness(0.96); }
+.clic:active { transform: scale(0.96); }
+.clic .adv { color: var(--ga-dorado-texto); font-size: 11px; }
+@media (max-width: 720px) {
+  .clic .badge { padding: 7px 12px; }   /* target más grande para el dedo */
+  td { padding: 13px 12px; }
+}

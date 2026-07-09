@@ -178,6 +178,8 @@ async function vistaTrabajos() {
   cargarTrabajos();
 }
 
+const AVANCE = { cotizar: 'presupuestado', presupuestado: 'pedido', pedido: 'en_progreso', en_progreso: 'finalizado', en_espera: 'en_progreso', finalizado: 'finalizado' };
+
 async function cargarTrabajos() {
   const qs = new URLSearchParams();
   const g = (id) => $('#' + id) && $('#' + id).value;
@@ -196,9 +198,9 @@ async function cargarTrabajos() {
       <td>${esc(t.contacto_nombre || t.cliente)}${t.empresa_nombre ? ` <small style="color:var(--ga-texto-2)">(${esc(t.empresa_nombre)})</small>` : ''}${t.origen === 'ia' && !t.revisado ? ' <em>(IA sin revisar)</em>' : ''}</td>
       <td>${esc(t.descripcion)}</td>
       <td>${LBL.disciplina[t.disciplina] || t.disciplina}</td>
-      <td>${badgeEstado(t.estado)}</td>
-      <td>${t.estado === 'finalizado' ? (t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')) : '-'}</td>
-      <td>${t.estado === 'finalizado' ? (t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')) : '-'}</td>
+      <td><span class="clic" data-adv="${t.id}" title="Avanzar estado">${badgeEstado(t.estado)} <b class="adv">▸</b></span></td>
+      <td><span class="clic" data-cobro="${t.id}" title="Marcar cobro">${t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')}</span></td>
+      <td><span class="clic" data-fact="${t.id}" title="Marcar facturación">${t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')}</span></td>
       <td>${money(t.precio)}</td>
       <td>${fecha(t.fecha_ingreso)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${t.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${t.id}" class="btn-danger">Eliminar</button>` : ''}</td>
@@ -208,6 +210,19 @@ async function cargarTrabajos() {
   $('#lista-trabajos').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formTrabajo(filas.find((t) => t.id == b.dataset.edit)));
   $('#lista-trabajos').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (confirm('¿Eliminar este trabajo?')) { await api('DELETE', '/trabajos/' + b.dataset.del); cargarTrabajos(); }
+  });
+
+  const rapido = async (id, campos) => { try { await api('PATCH', '/trabajos/' + id + '/rapido', campos); cargarTrabajos(); } catch (e) { alert(e.message); } };
+  $('#lista-trabajos').querySelectorAll('[data-adv]').forEach((b) => b.onclick = () => {
+    const t = filas.find((x) => x.id == b.dataset.adv);
+    const sig = AVANCE[t.estado] || t.estado;
+    if (sig !== t.estado) rapido(t.id, { estado: sig });
+  });
+  $('#lista-trabajos').querySelectorAll('[data-cobro]').forEach((b) => b.onclick = () => {
+    const t = filas.find((x) => x.id == b.dataset.cobro); rapido(t.id, { pagado: !t.pagado });
+  });
+  $('#lista-trabajos').querySelectorAll('[data-fact]').forEach((b) => b.onclick = () => {
+    const t = filas.find((x) => x.id == b.dataset.fact); rapido(t.id, { facturado: !t.facturado });
   });
 }
 

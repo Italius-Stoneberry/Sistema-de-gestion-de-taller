@@ -166,4 +166,26 @@ router.delete('/:id/borrador', puedeEditar, async (req, res) => {
   res.json({ ok: true });
 });
 
+// PATCH /api/trabajos/:id/rapido  -> cambios de un toque (estado / pagado / facturado) sin tocar el cliente
+router.patch('/:id/rapido', puedeEditar, async (req, res) => {
+  const b = req.body || {};
+  const sets = [];
+  const vals = [];
+  if (b.estado !== undefined) {
+    if (!ESTADOS.includes(b.estado)) return res.status(400).json({ error: 'Estado inválido' });
+    vals.push(b.estado); sets.push(`estado = $${vals.length}`);
+  }
+  if (b.pagado !== undefined) { vals.push(!!b.pagado); sets.push(`pagado = $${vals.length}`); }
+  if (b.facturado !== undefined) { vals.push(!!b.facturado); sets.push(`facturado = $${vals.length}`); }
+  if (!sets.length) return res.status(400).json({ error: 'Nada para actualizar' });
+  vals.push(req.params.id);
+  const { rows } = await query(
+    `UPDATE trabajos SET ${sets.join(', ')}, actualizado_en = now() WHERE id = $${vals.length} RETURNING *`,
+    vals
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
+  await audit(req.user.id, 'rapido', 'trabajo', rows[0].id, b);
+  res.json(rows[0]);
+});
+
 export default router;
