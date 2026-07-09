@@ -155,11 +155,13 @@ tr:hover td { background: var(--ga-superficie); }
   .filtros input, .filtros select, .filtros button { width: 100%; }
 
   /* Tablas de datos: scroll horizontal en vez de aplastarse */
-  #lista-trabajos, #lista-cheques, #lista-pagos, #lista-usuarios, #lista-bandeja {
+  #lista-trabajos, #lista-cheques, #lista-pagos, #lista-usuarios, #lista-bandeja,
+  #lista-empresas, #lista-contactos {
     overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
   #lista-trabajos table, #lista-cheques table, #lista-pagos table,
-  #lista-usuarios table, #lista-bandeja table { min-width: 620px; }
+  #lista-usuarios table, #lista-bandeja table,
+  #lista-empresas table, #lista-contactos table { min-width: 560px; }
 
   /* Tarjetas del dashboard: 2 por fila */
   .tarjetas { gap: 10px; }

@@ -87,6 +87,7 @@ const VISTAS = [
   { id: 'trabajos', nombre: 'Trabajos', render: vistaTrabajos },
   { id: 'cheques', nombre: 'Cheques', render: vistaCheques },
   { id: 'pagos', nombre: 'Pagos de servicios', render: vistaPagos },
+  { id: 'clientes', nombre: 'Clientes', render: vistaClientes },
   { id: 'bandeja', nombre: 'Bandeja', render: vistaBandeja },
   { id: 'usuarios', nombre: 'Usuarios', render: vistaUsuarios, soloAdmin: true },
 ];
@@ -190,7 +191,7 @@ async function cargarTrabajos() {
       <th>Cobro</th><th>Facturación</th><th>Precio</th><th>Ingreso</th><th></th>
     </tr></thead><tbody>
     ${filas.map((t) => `<tr>
-      <td>${esc(t.cliente)}${t.origen === 'ia' && !t.revisado ? ' <em>(IA sin revisar)</em>' : ''}</td>
+      <td>${esc(t.contacto_nombre || t.cliente)}${t.empresa_nombre ? ` <small style="color:var(--ga-texto-2)">(${esc(t.empresa_nombre)})</small>` : ''}${t.origen === 'ia' && !t.revisado ? ' <em>(IA sin revisar)</em>' : ''}</td>
       <td>${esc(t.descripcion)}</td>
       <td>${LBL.disciplina[t.disciplina] || t.disciplina}</td>
       <td>${badgeEstado(t.estado)}</td>
@@ -212,8 +213,10 @@ function formTrabajo(t, onDone) {
   t = t || {};
   abrirModal(`${t.id ? 'Editar' : 'Nuevo'} trabajo`, `
     <div class="grid">
-      <label class="full">Cliente <input name="cliente" value="${esc(t.cliente)}" required /></label>
-      <label>Contacto <input name="contacto" value="${esc(t.contacto)}" /></label>
+      <label class="full">Empresa (opcional) <input name="empresa_nombre" list="dl-empresas" value="${esc(t.empresa_nombre)}" placeholder="Andreu, Muni... (vacío si no aplica)" /></label>
+      <label class="full">Contacto / Cliente <input name="contacto_nombre" list="dl-contactos" value="${esc(t.contacto_nombre || t.cliente)}" placeholder="Ramiro, Marianela, o el nombre del cliente" required /></label>
+      <datalist id="dl-empresas"></datalist>
+      <datalist id="dl-contactos"></datalist>
       <label>Disciplina <select name="disciplina">${opts(LBL.disciplina, t.disciplina)}</select></label>
       <label class="full">Descripción <textarea name="descripcion">${esc(t.descripcion)}</textarea></label>
       <label>Estado <select name="estado">${opts(LBL.estado, t.estado)}</select></label>
@@ -226,7 +229,8 @@ function formTrabajo(t, onDone) {
     </div>
   `, async (f) => {
     const body = {
-      cliente: f.cliente.value, contacto: f.contacto.value, descripcion: f.descripcion.value,
+      empresa_nombre: f.empresa_nombre.value, contacto_nombre: f.contacto_nombre.value,
+      descripcion: f.descripcion.value,
       disciplina: f.disciplina.value, estado: f.estado.value, precio: Number(f.precio.value || 0),
       pagado: f.pagado.value === 'true', facturado: f.facturado.value === 'true',
       fecha_entrega_estimada: f.fecha_entrega_estimada.value || null,
@@ -236,6 +240,7 @@ function formTrabajo(t, onDone) {
     else await api('POST', '/trabajos', body);
     cerrarModal(); (onDone || cargarTrabajos)();
   });
+  poblarDatalistsCliente();
 }
 
 // ---------- Cheques ----------
@@ -451,6 +456,125 @@ async function refrescarBadgeBandeja(total) {
 }
 
 // ---------- Helpers de UI ----------
+// ---------- Clientes (empresas y contactos) ----------
+async function poblarDatalistsCliente() {
+  try {
+    const [emp, con] = await Promise.all([api('GET', '/empresas'), api('GET', '/contactos')]);
+    const de = $('#dl-empresas'); if (de) de.innerHTML = emp.map((e) => `<option value="${esc(e.nombre)}">`).join('');
+    const dc = $('#dl-contactos'); if (dc) dc.innerHTML = con.map((c) => `<option value="${esc(c.nombre)}">`).join('');
+  } catch (e) { /* silencioso */ }
+}
+
+async function vistaClientes() {
+  $('#contenido').innerHTML = `
+    <h2>Clientes</h2>
+    <p style="font-size:13px">Las empresas agrupan a los contactos que piden trabajos. Un cliente chico puede ser un contacto sin empresa. Tocá "Trabajos" para ver el historial y lo facturado.</p>
+    <div class="filtros">
+      ${puedeEditar() ? '<button id="btn-nueva-empresa" class="btn-primary">+ Nueva empresa</button>' : ''}
+      ${puedeEditar() ? '<button id="btn-nuevo-contacto" class="btn-primary">+ Nuevo contacto</button>' : ''}
+    </div>
+    <h3>Empresas</h3><div id="lista-empresas">Cargando...</div>
+    <h3>Contactos</h3><div id="lista-contactos">Cargando...</div>`;
+  if (puedeEditar()) {
+    $('#btn-nueva-empresa').addEventListener('click', () => formEmpresa());
+    $('#btn-nuevo-contacto').addEventListener('click', () => formContacto());
+  }
+  cargarEmpresas(); cargarContactos();
+}
+
+async function cargarEmpresas() {
+  const filas = await api('GET', '/empresas');
+  $('#lista-empresas').innerHTML = filas.length ? `
+    <table><thead><tr><th>Nombre</th><th>Cond. pago</th><th>Contactos</th><th>Teléfono</th><th></th></tr></thead><tbody>
+    ${filas.map((e) => `<tr>
+      <td>${esc(e.nombre)}</td>
+      <td>${e.condicion_pago === 'diferido' ? badge('Diferido','alerta') : badge('Contado','neutro')}</td>
+      <td>${e.contactos}</td><td>${esc(e.telefono)}</td>
+      <td class="acciones"><button data-trab="${e.id}">Trabajos</button>${puedeEditar() ? `<button data-edit="${e.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${e.id}" class="btn-danger">Eliminar</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>` : '<p>Sin empresas todavía.</p>';
+  $('#lista-empresas').querySelectorAll('[data-trab]').forEach((b) => b.onclick = () => verTrabajosCliente('empresa', b.dataset.trab, filas.find((e) => e.id == b.dataset.trab).nombre));
+  $('#lista-empresas').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formEmpresa(filas.find((e) => e.id == b.dataset.edit)));
+  $('#lista-empresas').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('¿Eliminar empresa? Los contactos quedan sin empresa.')) { await api('DELETE', '/empresas/' + b.dataset.del); cargarEmpresas(); cargarContactos(); } });
+}
+
+function formEmpresa(e) {
+  e = e || {};
+  abrirModal(`${e.id ? 'Editar' : 'Nueva'} empresa`, `
+    <div class="grid">
+      <label class="full">Nombre <input name="nombre" value="${esc(e.nombre)}" required /></label>
+      <label>Condición de pago <select name="condicion_pago"><option value="contado" ${e.condicion_pago !== 'diferido' ? 'selected' : ''}>Contado</option><option value="diferido" ${e.condicion_pago === 'diferido' ? 'selected' : ''}>Diferido</option></select></label>
+      <label>Teléfono <input name="telefono" value="${esc(e.telefono)}" /></label>
+      <label class="full">Notas <textarea name="notas">${esc(e.notas)}</textarea></label>
+    </div>`, async (f) => {
+    const body = { nombre: f.nombre.value, condicion_pago: f.condicion_pago.value, telefono: f.telefono.value, notas: f.notas.value };
+    if (e.id) await api('PUT', '/empresas/' + e.id, body); else await api('POST', '/empresas', body);
+    cerrarModal(); cargarEmpresas();
+  });
+}
+
+async function cargarContactos() {
+  const filas = await api('GET', '/contactos');
+  $('#lista-contactos').innerHTML = filas.length ? `
+    <table><thead><tr><th>Nombre</th><th>Empresa</th><th>Teléfono</th><th></th></tr></thead><tbody>
+    ${filas.map((c) => `<tr>
+      <td>${esc(c.nombre)}</td>
+      <td>${c.empresa_nombre ? esc(c.empresa_nombre) : '<span style="color:var(--ga-texto-2)">—</span>'}</td>
+      <td>${esc(c.telefono)}</td>
+      <td class="acciones"><button data-trab="${c.id}">Trabajos</button>${puedeEditar() ? `<button data-edit="${c.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${c.id}" class="btn-danger">Eliminar</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>` : '<p>Sin contactos todavía.</p>';
+  $('#lista-contactos').querySelectorAll('[data-trab]').forEach((b) => b.onclick = () => verTrabajosCliente('contacto', b.dataset.trab, filas.find((c) => c.id == b.dataset.trab).nombre));
+  $('#lista-contactos').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formContacto(filas.find((c) => c.id == b.dataset.edit)));
+  $('#lista-contactos').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('¿Eliminar contacto?')) { await api('DELETE', '/contactos/' + b.dataset.del); cargarContactos(); } });
+}
+
+async function formContacto(c) {
+  c = c || {};
+  const empresas = await api('GET', '/empresas');
+  const opciones = ['<option value="">— sin empresa —</option>']
+    .concat(empresas.map((e) => `<option value="${e.id}" ${c.empresa_id == e.id ? 'selected' : ''}>${esc(e.nombre)}</option>`))
+    .join('');
+  abrirModal(`${c.id ? 'Editar' : 'Nuevo'} contacto`, `
+    <div class="grid">
+      <label class="full">Nombre <input name="nombre" value="${esc(c.nombre)}" required /></label>
+      <label class="full">Empresa <select name="empresa_id">${opciones}</select></label>
+      <label>Teléfono <input name="telefono" value="${esc(c.telefono)}" /></label>
+      <label class="full">Notas <textarea name="notas">${esc(c.notas)}</textarea></label>
+    </div>`, async (f) => {
+    const body = { nombre: f.nombre.value, empresa_id: f.empresa_id.value || null, telefono: f.telefono.value, notas: f.notas.value };
+    if (c.id) await api('PUT', '/contactos/' + c.id, body); else await api('POST', '/contactos', body);
+    cerrarModal(); cargarContactos();
+  });
+}
+
+// Historial de trabajos de un cliente (empresa o contacto) con totales
+async function verTrabajosCliente(tipo, id, nombre) {
+  const qs = (tipo === 'empresa' ? 'empresa_id=' : 'contacto_id=') + id;
+  const filas = await api('GET', '/trabajos?' + qs);
+  const suma = (f) => f.reduce((a, t) => a + Number(t.precio || 0), 0);
+  const total = suma(filas);
+  const porCobrar = suma(filas.filter((t) => t.estado === 'finalizado' && !t.pagado));
+  abrirModalInfo('Trabajos de ' + nombre, `
+    <div class="tarjetas" style="margin-bottom:14px">
+      <div class="tarjeta"><div>Trabajos</div><div class="num">${filas.length}</div></div>
+      <div class="tarjeta"><div>Facturado total</div><div class="num">${money(total)}</div></div>
+      <div class="tarjeta"><div>Por cobrar</div><div class="num">${money(porCobrar)}</div></div>
+    </div>
+    ${filas.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Fecha</th><th>Descripción</th><th>Disciplina</th><th>Estado</th><th>Precio</th></tr></thead><tbody>
+      ${filas.map((t) => `<tr><td>${fecha(t.fecha_ingreso)}</td><td>${esc(t.descripcion)}</td><td>${LBL.disciplina[t.disciplina] || t.disciplina}</td><td>${badgeEstado(t.estado)}</td><td>${money(t.precio)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p>Sin trabajos registrados para este cliente.</p>'}`);
+}
+
+function abrirModalInfo(titulo, html) {
+  cerrarModal();
+  const fondo = document.createElement('div');
+  fondo.className = 'modal-fondo';
+  fondo.id = 'modal-fondo';
+  fondo.innerHTML = `<div class="modal" style="width:640px"><h3>${esc(titulo)}</h3>${html}
+    <div class="acciones" style="margin-top:16px"><button type="button" id="modal-cerrar" class="btn-primary">Cerrar</button></div></div>`;
+  document.body.appendChild(fondo);
+  fondo.querySelector('#modal-cerrar').onclick = cerrarModal;
+}
+
 function opts(map, sel) {
   return Object.entries(map).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 }

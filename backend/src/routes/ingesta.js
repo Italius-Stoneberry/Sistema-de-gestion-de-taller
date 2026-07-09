@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereIngest } from '../auth.js';
+import { resolverEmpresa, resolverContacto } from '../resolvers.js';
 
 const router = Router();
 router.use(requiereIngest); // toda la ingesta usa API key (n8n), no login humano
@@ -10,14 +11,16 @@ const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
 // POST /api/ingesta/trabajo  -> crea un trabajo como BORRADOR (revisado=false) para revisión humana
 router.post('/trabajo', async (req, res) => {
   const b = req.body || {};
-  if (!b.cliente) return res.status(400).json({ error: 'Falta cliente' });
   const disciplina = DISCIPLINAS.includes(b.disciplina) ? b.disciplina : 'laser';
+  let empresaId = b.empresa_id || (b.empresa_nombre ? await resolverEmpresa(b.empresa_nombre, 'ia') : null);
+  let contactoId = b.contacto_id || (b.contacto_nombre ? await resolverContacto(b.contacto_nombre, empresaId, 'ia') : null);
+  const clienteTxt = (b.cliente || b.contacto_nombre || b.empresa_nombre || 'Sin nombre').trim();
   const { rows } = await query(
     `INSERT INTO trabajos
-      (cliente, contacto, descripcion, disciplina, estado, precio, notas,
+      (cliente, contacto, empresa_id, contacto_id, descripcion, disciplina, estado, precio, notas,
        origen, revisado, origen_ref)
-     VALUES ($1,$2,$3,$4,'pedido',$5,$6,'ia',FALSE,$7) RETURNING *`,
-    [b.cliente, b.contacto || null, b.descripcion || null, disciplina,
+     VALUES ($1,$2,$3,$4,$5,$6,'pedido',$7,$8,'ia',FALSE,$9) RETURNING *`,
+    [clienteTxt, b.contacto || null, empresaId, contactoId, b.descripcion || null, disciplina,
      b.precio || 0, b.notas || null, b.origen_ref || null]
   );
   await audit(null, 'ingesta', 'trabajo', rows[0].id, { origen_ref: b.origen_ref });

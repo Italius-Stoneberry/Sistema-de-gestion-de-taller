@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereAuth, puedeEditar, soloAdmin } from '../auth.js';
+import { resolverEmpresa, resolverContacto } from '../resolvers.js';
 
 const router = Router();
 router.use(requiereAuth);
@@ -8,9 +9,20 @@ router.use(requiereAuth);
 const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
 const ESTADOS = ['pedido', 'en_progreso', 'en_espera', 'finalizado'];
 
+// Resuelve empresa y contacto a partir de ids o nombres (los crea si no existen).
+async function resolverCliente(b, origen = 'manual') {
+  let empresaId = null;
+  if (b.empresa_id) empresaId = b.empresa_id;
+  else if (b.empresa_nombre) empresaId = await resolverEmpresa(b.empresa_nombre, origen);
+  let contactoId = null;
+  if (b.contacto_id) contactoId = b.contacto_id;
+  else if (b.contacto_nombre) contactoId = await resolverContacto(b.contacto_nombre, empresaId, origen);
+  return { empresaId, contactoId };
+}
+
 // GET /api/trabajos  (filtros opcionales: estado, disciplina, pagado, facturado, buscar)
 router.get('/', async (req, res) => {
-  const { estado, disciplina, pagado, facturado, revisado, buscar } = req.query;
+  const { estado, disciplina, pagado, facturado, revisado, empresa_id, contacto_id, buscar } = req.query;
   const cond = [];
   const vals = [];
   const push = (sql, ...args) => { args.forEach((a) => vals.push(a)); cond.push(sql); };
@@ -20,13 +32,20 @@ router.get('/', async (req, res) => {
   if (pagado === 'true' || pagado === 'false') push(`pagado = $${vals.length + 1}`, pagado === 'true');
   if (facturado === 'true' || facturado === 'false') push(`facturado = $${vals.length + 1}`, facturado === 'true');
   if (revisado === 'true' || revisado === 'false') push(`revisado = $${vals.length + 1}`, revisado === 'true');
+  if (empresa_id) push(`t.empresa_id = $${vals.length + 1}`, empresa_id);
+  if (contacto_id) push(`t.contacto_id = $${vals.length + 1}`, contacto_id);
   if (buscar) push(`(cliente ILIKE $${vals.length + 1} OR descripcion ILIKE $${vals.length + 2})`, `%${buscar}%`, `%${buscar}%`);
 
   const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
   const { rows } = await query(
-    `SELECT * FROM trabajos ${where} ORDER BY
-       CASE estado WHEN 'en_progreso' THEN 0 WHEN 'pedido' THEN 1 WHEN 'en_espera' THEN 2 ELSE 3 END,
-       fecha_ingreso DESC, id DESC`,
+    `SELECT t.*, e.nombre AS empresa_nombre, c.nombre AS contacto_nombre
+     FROM trabajos t
+     LEFT JOIN empresas e ON e.id = t.empresa_id
+     LEFT JOIN contactos c ON c.id = t.contacto_id
+     ${where}
+     ORDER BY
+       CASE t.estado WHEN 'en_progreso' THEN 0 WHEN 'pedido' THEN 1 WHEN 'en_espera' THEN 2 ELSE 3 END,
+       t.fecha_ingreso DESC, t.id DESC`,
     vals
   );
   res.json(rows);
@@ -34,7 +53,14 @@ router.get('/', async (req, res) => {
 
 // GET /api/trabajos/:id
 router.get('/:id', async (req, res) => {
-  const { rows } = await query('SELECT * FROM trabajos WHERE id = $1', [req.params.id]);
+  const { rows } = await query(
+    `SELECT t.*, e.nombre AS empresa_nombre, c.nombre AS contacto_nombre
+     FROM trabajos t
+     LEFT JOIN empresas e ON e.id = t.empresa_id
+     LEFT JOIN contactos c ON c.id = t.contacto_id
+     WHERE t.id = $1`,
+    [req.params.id]
+  );
   if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
   res.json(rows[0]);
 });
@@ -42,21 +68,24 @@ router.get('/:id', async (req, res) => {
 // POST /api/trabajos
 router.post('/', puedeEditar, async (req, res) => {
   const b = req.body || {};
-  if (!b.cliente) return res.status(400).json({ error: 'El cliente es obligatorio' });
   if (!DISCIPLINAS.includes(b.disciplina)) return res.status(400).json({ error: 'Disciplina inválida' });
+
+  const { empresaId, contactoId } = await resolverCliente(b);
+  const clienteTxt = (b.cliente || b.contacto_nombre || b.empresa_nombre || '').trim();
+  if (!clienteTxt) return res.status(400).json({ error: 'Falta el cliente o contacto' });
 
   const { rows } = await query(
     `INSERT INTO trabajos
-      (cliente, contacto, descripcion, disciplina, estado, pagado, facturado,
+      (cliente, contacto, empresa_id, contacto_id, descripcion, disciplina, estado, pagado, facturado,
        precio, fecha_entrega_estimada, responsable, notas, creado_por)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
-    [b.cliente, b.contacto || null, b.descripcion || null, b.disciplina,
+    [clienteTxt, b.contacto || null, empresaId, contactoId, b.descripcion || null, b.disciplina,
      ESTADOS.includes(b.estado) ? b.estado : 'pedido',
      !!b.pagado, !!b.facturado, b.precio || 0,
      b.fecha_entrega_estimada || null, b.responsable || null, b.notas || null, req.user.id]
   );
-  await audit(req.user.id, 'crear', 'trabajo', rows[0].id, { cliente: b.cliente });
+  await audit(req.user.id, 'crear', 'trabajo', rows[0].id, { cliente: clienteTxt });
   res.status(201).json(rows[0]);
 });
 
@@ -66,23 +95,27 @@ router.put('/:id', puedeEditar, async (req, res) => {
   if (b.disciplina && !DISCIPLINAS.includes(b.disciplina)) return res.status(400).json({ error: 'Disciplina inválida' });
   if (b.estado && !ESTADOS.includes(b.estado)) return res.status(400).json({ error: 'Estado inválido' });
 
+  const { empresaId, contactoId } = await resolverCliente(b);
+
   const { rows } = await query(
     `UPDATE trabajos SET
        cliente = COALESCE($1, cliente),
        contacto = $2,
-       descripcion = $3,
-       disciplina = COALESCE($4, disciplina),
-       estado = COALESCE($5, estado),
-       pagado = COALESCE($6, pagado),
-       facturado = COALESCE($7, facturado),
-       precio = COALESCE($8, precio),
-       fecha_entrega_estimada = $9,
-       fecha_entrega_real = $10,
-       responsable = $11,
-       notas = $12,
+       empresa_id = $3,
+       contacto_id = $4,
+       descripcion = $5,
+       disciplina = COALESCE($6, disciplina),
+       estado = COALESCE($7, estado),
+       pagado = COALESCE($8, pagado),
+       facturado = COALESCE($9, facturado),
+       precio = COALESCE($10, precio),
+       fecha_entrega_estimada = $11,
+       fecha_entrega_real = $12,
+       responsable = $13,
+       notas = $14,
        actualizado_en = now()
-     WHERE id = $13 RETURNING *`,
-    [b.cliente ?? null, b.contacto ?? null, b.descripcion ?? null, b.disciplina ?? null,
+     WHERE id = $15 RETURNING *`,
+    [b.cliente ?? null, b.contacto ?? null, empresaId, contactoId, b.descripcion ?? null, b.disciplina ?? null,
      b.estado ?? null, (b.pagado === undefined ? null : !!b.pagado),
      (b.facturado === undefined ? null : !!b.facturado), b.precio ?? null,
      b.fecha_entrega_estimada || null, b.fecha_entrega_real || null,

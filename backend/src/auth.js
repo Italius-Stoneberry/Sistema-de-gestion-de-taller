@@ -48,3 +48,13 @@ export function requiereIngest(req, res, next) {
   req.user = { id: null, nombre: 'ingesta-ia', rol: 'gestor', ingest: true };
   next();
 }
+
+// Acepta sesión de usuario (JWT) O API key de ingesta. Para búsquedas que usan tanto la app como n8n.
+export function requiereAuthOIngest(req, res, next) {
+  const key = req.headers['x-api-key'];
+  if (key && process.env.INGEST_API_KEY && key === process.env.INGEST_API_KEY) {
+    req.user = { id: null, nombre: 'ingesta-ia', rol: 'gestor', ingest: true };
+    return next();
+  }
+  return requiereAuth(req, res, next);
+}
