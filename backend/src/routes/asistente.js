@@ -251,6 +251,7 @@ router.post('/mensaje', async (req, res) => {
   // Router con contexto
   const ctxNegocio = await contextoClientes();
   const d = await ollamaJSON(promptClasificar(texto, ctxNegocio));
+  if (!d || Object.keys(d).length === 0) return res.json({ reply: '🤖 Uy, no te pude procesar (la IA no respondió). ¿Me lo repetís?' });
   const intent = d.intencion || 'nuevo_trabajo';
   const idMenc = d.id || (texto.match(/#?(\d{1,6})/) ? Number(texto.match(/#?(\d{1,6})/)[1]) : null);
 
