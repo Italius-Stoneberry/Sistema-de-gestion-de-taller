@@ -1,0 +1,127 @@
+{
+  "name": "Taller — Resumen programado (cron)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6-21/3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "sch",
+      "name": "Cada 3 horas (6 a 21)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Números que reciben el resumen (con código de país, sin @c.us)\nconst numeros = [\"5492616828285\", \"5492615077088\", \"5492615080380\", \"5492614681780\"];\nreturn numeros.map((n) => ({ json: { numero: n } }));"
+      },
+      "id": "nu",
+      "name": "Números",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:3000/api/asistente/nudge?to={{ $json.numero }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "PEGA_TU_INGEST_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Pedir_resumen",
+      "name": "Pedir resumen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "6211e57bdd66ed7f55a2410ca84ca7d8"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: \"default\", chatId: $(\"Números\").item.json.numero + \"@c.us\", text: $json.reply }) }}"
+      },
+      "id": "Enviar_resumen",
+      "name": "Enviar resumen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cada 3 horas (6 a 21)": {
+      "main": [
+        [
+          {
+            "node": "Números",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Números": {
+      "main": [
+        [
+          {
+            "node": "Pedir resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir resumen": {
+      "main": [
+        [
+          {
+            "node": "Enviar resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
