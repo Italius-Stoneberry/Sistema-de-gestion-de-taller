@@ -97,7 +97,7 @@
           "parameters": [
             {
               "name": "X-Api-Key",
-              "value": "6211e57bdd66ed7f55a2410ca84ca7d8"
+              "value": "PEGA_TU_WAHA_API_KEY"
             }
           ]
         },
@@ -182,7 +182,7 @@
           "parameters": [
             {
               "name": "X-Api-Key",
-              "value": "6211e57bdd66ed7f55a2410ca84ca7d8"
+              "value": "PEGA_TU_WAHA_API_KEY"
             }
           ]
         },
