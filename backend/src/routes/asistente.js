@@ -9,7 +9,10 @@ router.use(requiereIngest);
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:14b';
 const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
+const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera', 'finalizado'];
+const LBL_ESTADO = { cotizar: 'por cotizar', presupuestado: 'presupuestado', pedido: 'pedido', en_progreso: 'en progreso', en_espera: 'en espera', finalizado: 'finalizado' };
 const AUTORIZADOS = (process.env.AUTORIZADOS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
 
 async function ollamaJSON(prompt) {
   try {
@@ -27,14 +30,11 @@ async function getCtx(chatId) {
   return rows[0] || { estado: 'idle', datos: {} };
 }
 async function setCtx(chatId, estado, datos) {
-  await query(
-    `INSERT INTO conversaciones (chat_id, estado, datos, actualizado_en) VALUES ($1,$2,$3,now())
+  await query(`INSERT INTO conversaciones (chat_id, estado, datos, actualizado_en) VALUES ($1,$2,$3,now())
      ON CONFLICT (chat_id) DO UPDATE SET estado = $2, datos = $3, actualizado_en = now()`,
-    [chatId, estado, JSON.stringify(datos || {})]
-  );
+    [chatId, estado, JSON.stringify(datos || {})]);
 }
 
-// Contexto del negocio: clientes/empresas conocidos, para que la IA desambigüe persona vs empresa
 async function contextoClientes() {
   const emp = await query('SELECT nombre FROM empresas ORDER BY creado_en DESC LIMIT 40');
   const con = await query('SELECT c.nombre, e.nombre AS empresa FROM contactos c LEFT JOIN empresas e ON e.id = c.empresa_id ORDER BY c.creado_en DESC LIMIT 40');
@@ -53,59 +53,56 @@ async function contar() {
 }
 async function menuTexto() {
   const c = await contar();
-  return `🤖 ¡Buenas! Tenés:\n• ${c.activos} trabajos en curso\n• ${c.bandeja} en la bandeja sin confirmar\n• ${c.sin_presup} sin presupuestar\n\nPreguntame lo que quieras ("qué tengo pendiente", "mostrame la bandeja") o mandame un pedido nuevo.`;
+  return `🤖 ¡Buenas! Tenés:\n• ${c.activos} trabajos en curso\n• ${c.bandeja} en la bandeja sin confirmar\n• ${c.sin_presup} sin presupuestar\n\nPreguntame lo que quieras, o mandame/actualizá pedidos hablando normal.`;
 }
 async function listarActivos(chatId) {
   const { rows } = await query(`SELECT id, cliente, descripcion, estado FROM trabajos WHERE estado IN ('pedido','en_progreso','en_espera') AND revisado ORDER BY actualizado_en ASC LIMIT 8`);
   if (!rows.length) { if (chatId) await setCtx(chatId, 'idle', {}); return 'No hay trabajos en curso 👍'; }
   const lista = rows.map((r, i) => ({ n: i + 1, id: r.id, cliente: r.cliente, descripcion: r.descripcion, estado: r.estado }));
   if (chatId) await setCtx(chatId, 'eligiendo', { lista });
-  const txt = lista.map((x) => `${x.n}) #${x.id} ${x.cliente} — ${x.descripcion || ''} [${x.estado}]`).join('\n');
-  return `Trabajos en curso:\n${txt}\n\nContame qué pasó, ej: "el 1 se terminó y se cobró".`;
+  return 'Trabajos en curso:\n' + lista.map((x) => `${x.n}) #${x.id} ${x.cliente} — ${x.descripcion || ''} [${LBL_ESTADO[x.estado]}]`).join('\n') + '\n\nContame qué pasó, ej: "el 1 se terminó y se cobró".';
 }
 async function listarBandeja() {
   const { rows } = await query('SELECT id, cliente, descripcion, precio FROM trabajos WHERE revisado = FALSE ORDER BY creado_en DESC LIMIT 10');
   if (!rows.length) return 'La bandeja está vacía 👍';
-  const txt = rows.map((r) => `#${r.id} ${r.cliente} — ${r.descripcion || ''} ($${r.precio})`).join('\n');
-  return `Bandeja (sin confirmar):\n${txt}\n\nRespondé "ok #<n>" para confirmar o "no #<n>" para descartar.`;
+  return 'Bandeja (sin confirmar):\n' + rows.map((r) => `#${r.id} ${r.cliente} — ${r.descripcion || ''} (${money(r.precio)})`).join('\n') + '\n\nRespondé "ok #<n>" para confirmar o "no #<n>" para descartar.';
 }
 async function listarSinPresup() {
   const { rows } = await query("SELECT id, cliente, descripcion FROM trabajos WHERE estado = 'cotizar' AND revisado ORDER BY creado_en ASC LIMIT 10");
   if (!rows.length) return 'No hay nada sin presupuestar 👍';
   return 'Sin presupuestar:\n' + rows.map((r) => `#${r.id} ${r.cliente} — ${r.descripcion || ''}`).join('\n');
 }
-async function aplicar(id, campos) {
+
+async function aplicar(id, c) {
   const sets = []; const vals = [];
-  if (campos.finalizado === true) { vals.push('finalizado'); sets.push(`estado = $${vals.length}`); }
-  else if (campos.estado) { vals.push(campos.estado); sets.push(`estado = $${vals.length}`); }
-  if (campos.pagado === true || campos.pagado === false) { vals.push(campos.pagado); sets.push(`pagado = $${vals.length}`); }
-  if (campos.facturado === true || campos.facturado === false) { vals.push(campos.facturado); sets.push(`facturado = $${vals.length}`); }
+  if (c.estado) { vals.push(c.estado); sets.push(`estado = $${vals.length}`); }
+  else if (c.finalizado === true) { vals.push('finalizado'); sets.push(`estado = $${vals.length}`); }
+  if (c.pagado === true || c.pagado === false) { vals.push(c.pagado); sets.push(`pagado = $${vals.length}`); }
+  if (c.facturado === true || c.facturado === false) { vals.push(c.facturado); sets.push(`facturado = $${vals.length}`); }
+  if (typeof c.precio === 'number' && c.precio > 0) { vals.push(c.precio); sets.push(`precio = $${vals.length}`); }
+  if (DISCIPLINAS.includes(c.disciplina)) { vals.push(c.disciplina); sets.push(`disciplina = $${vals.length}`); }
   if (!sets.length) return null;
   vals.push(id);
   const { rows } = await query(`UPDATE trabajos SET ${sets.join(', ')}, actualizado_en = now() WHERE id = $${vals.length} RETURNING *`, vals);
-  await audit(null, 'asistente', 'trabajo', id, campos);
+  await audit(null, 'asistente', 'trabajo', id, c);
   return rows[0];
 }
 async function crearBorradorDesde(d) {
   const empresaId = (d.empresa && d.empresa.trim()) ? await resolverEmpresa(d.empresa.trim(), 'ia') : null;
   const contactoId = (d.contacto && d.contacto.trim()) ? await resolverContacto(d.contacto.trim(), empresaId, 'ia') : null;
-  const cliente = (d.contacto && d.contacto.trim())
-    ? (d.contacto.trim() + (d.empresa && d.empresa.trim() ? ` (${d.empresa.trim()})` : ''))
-    : ((d.empresa && d.empresa.trim()) || 'Sin nombre');
+  const cliente = (d.contacto && d.contacto.trim()) ? (d.contacto.trim() + (d.empresa && d.empresa.trim() ? ` (${d.empresa.trim()})` : '')) : ((d.empresa && d.empresa.trim()) || 'Sin nombre');
   const disciplina = DISCIPLINAS.includes(d.disciplina) ? d.disciplina : 'laser';
   const { rows } = await query(
     `INSERT INTO trabajos (cliente, empresa_id, contacto_id, descripcion, disciplina, estado, precio, origen, revisado, origen_ref)
      VALUES ($1,$2,$3,$4,$5,'pedido',$6,'ia',FALSE,$7) RETURNING *`,
-    [cliente, empresaId, contactoId, d.descripcion || null, disciplina, Number(d.precio) || 0, 'WhatsApp']
-  );
+    [cliente, empresaId, contactoId, d.descripcion || null, disciplina, Number(d.precio) || 0, 'WhatsApp']);
   await audit(null, 'ingesta', 'trabajo', rows[0].id, null);
   return rows[0];
 }
 async function confirmarBorrador(accion, id) {
   if (!id) {
     const r = await query("SELECT id FROM trabajos WHERE revisado = FALSE AND origen = 'ia' ORDER BY creado_en DESC LIMIT 1");
-    if (!r.rows[0]) return null;
-    id = r.rows[0].id;
+    if (!r.rows[0]) return null; id = r.rows[0].id;
   }
   if (accion === 'descartar') {
     const { rows } = await query('DELETE FROM trabajos WHERE id = $1 AND revisado = FALSE RETURNING cliente', [id]);
@@ -115,33 +112,97 @@ async function confirmarBorrador(accion, id) {
   return rows[0] ? { accion: 'confirmado', id, cliente: rows[0].cliente } : null;
 }
 
+// ---- Editar hablando: resolver referencia y aplicar ----
+async function resolverRef(u, ctx) {
+  if (u.ref_id) return { id: Number(u.ref_id) };
+  if (u.ref_n && ctx.datos && ctx.datos.lista) {
+    const it = ctx.datos.lista.find((x) => x.n == u.ref_n);
+    if (it) return { id: it.id };
+  }
+  if (u.ref_cliente) {
+    const { rows } = await query(
+      "SELECT id FROM trabajos WHERE cliente ILIKE '%'||$1||'%' ORDER BY (estado <> 'finalizado') DESC, actualizado_en DESC LIMIT 3",
+      [u.ref_cliente]);
+    if (rows.length === 1) return { id: rows[0].id };
+    if (rows.length > 1) return { multiple: rows.map((r) => r.id) };
+  }
+  return {};
+}
+
+// ---- Consultas ----
+function filtroPeriodoSQL(periodo, idx) {
+  if (periodo === 'hoy') return ` AND actualizado_en >= date_trunc('day', now())`;
+  if (periodo === 'semana') return ` AND actualizado_en >= now() - interval '7 days'`;
+  if (periodo === 'mes') return ` AND actualizado_en >= date_trunc('month', now())`;
+  return '';
+}
+function etiquetaPeriodo(p) { return p === 'hoy' ? ' hoy' : p === 'semana' ? ' esta semana' : p === 'mes' ? ' este mes' : ''; }
+
+async function responderConsulta(q) {
+  const tipo = q.tipo;
+  const per = etiquetaPeriodo(q.periodo);
+  const perSQL = filtroPeriodoSQL(q.periodo);
+  if (tipo === 'facturado_cliente' && q.cliente) {
+    const { rows } = await query(`SELECT COUNT(*)::int n, COALESCE(SUM(precio),0) total FROM trabajos WHERE estado='finalizado' AND facturado AND cliente ILIKE '%'||$1||'%'` + perSQL, [q.cliente]);
+    return `Facturado a ${q.cliente}${per}: ${money(rows[0].total)} en ${rows[0].n} trabajo(s).`;
+  }
+  if (tipo === 'por_cobrar') {
+    if (q.cliente) {
+      const { rows } = await query(`SELECT COUNT(*)::int n, COALESCE(SUM(precio),0) total FROM trabajos WHERE estado='finalizado' AND NOT pagado AND cliente ILIKE '%'||$1||'%'`, [q.cliente]);
+      return `${q.cliente} te debe ${money(rows[0].total)} (${rows[0].n} trabajo(s) sin cobrar).`;
+    }
+    const { rows } = await query(`SELECT COUNT(*)::int n, COALESCE(SUM(precio),0) total FROM trabajos WHERE estado='finalizado' AND NOT pagado`);
+    return `Por cobrar en total: ${money(rows[0].total)} (${rows[0].n} trabajo(s) finalizados sin cobrar).`;
+  }
+  if (tipo === 'ventas_periodo') {
+    const { rows } = await query(`SELECT COUNT(*)::int n, COALESCE(SUM(precio),0) total FROM trabajos WHERE estado='finalizado'` + perSQL);
+    return `Ventas${per || ' (total)'}: ${money(rows[0].total)} en ${rows[0].n} trabajo(s) finalizados.`;
+  }
+  if (tipo === 'trabajos_cliente' && q.cliente) {
+    const { rows } = await query(`SELECT id, descripcion, estado, precio FROM trabajos WHERE cliente ILIKE '%'||$1||'%' ORDER BY actualizado_en DESC LIMIT 10`, [q.cliente]);
+    if (!rows.length) return `No encontré trabajos de ${q.cliente}.`;
+    return `Trabajos de ${q.cliente}:\n` + rows.map((r) => `#${r.id} ${r.descripcion || ''} [${LBL_ESTADO[r.estado]}] ${money(r.precio)}`).join('\n');
+  }
+  return 'No pude armar esa consulta. Probá: "cuánto le facturé a Andreu", "qué me deben", "cuánto vendí este mes", "trabajos de Ramiro".';
+}
+
 const esSi = (t) => /^(s[ií]|dale|obvio|sip|yes|ya|listo)\b/i.test(t);
 const esNo = (t) => /^(no|nop|todav[ií]a|a[uú]n no|negativo)\b/i.test(t);
 const esSaludo = (t) => ['hola', 'menu', 'menú', 'inicio', 'buenas', 'empezar', 'buen dia'].includes(t);
-const esSalir = (t) => ['salir', 'chau', 'gracias', 'nada', 'listo gracias', 'no gracias'].includes(t);
+const esSalir = (t) => ['salir', 'chau', 'gracias', 'nada'].includes(t);
 
 function promptClasificar(texto, ctxNegocio) {
-  return `Sos el asistente de un taller gráfico. Interpretás mensajes de WhatsApp escritos informalmente (jerga argentina, sin puntuación).\n\n`
-    + `${ctxNegocio}\n\n`
-    + `El usuario escribió: "${texto}".\n\n`
-    + `Devolvé SOLO un JSON con:\n`
-    + `- "intencion": una de [nuevo_trabajo, ver_activos, ver_bandeja, ver_sin_presupuestar, resumen, confirmar, descartar].\n`
-    + `- "id": número de trabajo si menciona uno (ej #5), si no null.\n`
-    + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo), "precio" (entero en pesos, 0 si no se menciona).\n\n`
-    + `REGLAS DE CLIENTE (muy importante, usá las listas de arriba):\n`
-    + `- Si el nombre coincide o se parece a una EMPRESA conocida => es empresa.\n`
-    + `- Si coincide a un CONTACTO conocido => es contacto (persona); si ese contacto tiene empresa, poné esa empresa.\n`
-    + `- Formato "X de Y" => contacto: X, empresa: Y.\n`
-    + `- Un nombre de persona suelto y desconocido (sin empresa) => contacto (cliente individual), empresa: "".\n`
-    + `- NUNCA inventes ni pongas etiquetas como "cliente individual" o "particular" como nombre. Si no hay empresa, dejá empresa: "".\n\n`
-    + `INTENCIÓN según contenido:\n`
-    + `- Describe un encargo (cliente/cantidad/producto/precio) => nuevo_trabajo.\n`
-    + `- "qué tengo / en curso / pendientes / en proceso" => ver_activos.\n`
-    + `- "bandeja / sin confirmar / qué entró / borradores" => ver_bandeja.\n`
-    + `- "sin presupuestar / falta cotizar / presupuestos" => ver_sin_presupuestar.\n`
-    + `- "resumen / cómo viene / menú / hola" => resumen.\n`
-    + `- "ok / sí / dale / listo / confirmá" => confirmar. "no / descartá" => descartar.\n`
-    + `Jerga de plata: luca/lucas = miles (80 lucas = 80000); palo = millón; gamba = 100.`;
+  return `Sos el asistente de un taller gráfico. Interpretás WhatsApp informal (jerga argentina).\n\n${ctxNegocio}\n\n`
+    + `El usuario escribió: "${texto}".\nDevolvé SOLO un JSON con:\n`
+    + `- "intencion": [nuevo_trabajo, actualizar_trabajo, consulta, ver_activos, ver_bandeja, ver_sin_presupuestar, resumen, confirmar, descartar].\n`
+    + `- "id": número de trabajo si menciona uno (#5), si no null.\n`
+    + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo), "precio" (entero, 0 si no hay).\n\n`
+    + `Cómo elegir la intención:\n`
+    + `- nuevo_trabajo: encarga algo por primera vez (cliente + cantidad/producto). Ej: "ramiro quiere 100 volantes".\n`
+    + `- actualizar_trabajo: informa un cambio sobre un trabajo YA existente (se terminó/cobró/facturó, cambiar estado/precio/disciplina). Ej: "el de andreu se entregó", "poné el 3 en espera", "cambiá el precio del 5".\n`
+    + `- consulta: pregunta datos. Ej: "cuánto le facturé a X", "qué me deben", "cuánto vendí este mes", "trabajos de X".\n`
+    + `- ver_activos / ver_bandeja / ver_sin_presupuestar: pide ver esas listas. resumen: "cómo viene/menú/hola".\n`
+    + `- confirmar/descartar: "ok/sí" o "no" a un borrador.\n\n`
+    + `Reglas de cliente (usá las listas de arriba): empresa conocida => empresa; contacto conocido => persona; "X de Y" => contacto X, empresa Y; nombre suelto desconocido => contacto (individual), empresa "". Nunca pongas "cliente individual" como nombre; si no hay empresa, empresa: "".\n`
+    + `Jerga: lucas=miles (80 lucas=80000), palo=millón, gamba=100.`;
+}
+function promptActualizar(texto, listaTxt) {
+  return `El usuario quiere modificar un trabajo existente.${listaTxt ? ' Lista reciente: ' + listaTxt + '.' : ''}\nDijo: "${texto}".\n`
+    + `Devolvé SOLO JSON:\n`
+    + `- "ref_id": número si dice #N o un id, si no null.\n`
+    + `- "ref_n": posición en la lista reciente si dice "el 1/2/3", si no null.\n`
+    + `- "ref_cliente": nombre de cliente/empresa si se refiere por nombre ("el de andreu"), si no null.\n`
+    + `- "estado": uno de [cotizar, presupuestado, pedido, en_progreso, en_espera, finalizado] si cambia el estado (terminó/entregó=finalizado, en espera=en_espera, empezó/haciendo=en_progreso), si no null.\n`
+    + `- "pagado": true/false/null. "facturado": true/false/null.\n`
+    + `- "precio": entero en pesos si menciona precio nuevo, si no null (lucas=miles).\n`
+    + `- "disciplina": laser|serigrafia|ploteo si la cambia, si no null.`;
+}
+function promptConsulta(texto) {
+  return `El usuario de un taller hace una consulta. Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
+    + `- "tipo": [facturado_cliente, por_cobrar, ventas_periodo, trabajos_cliente].\n`
+    + `  facturado_cliente: cuánto se le facturó/vendió a un cliente. por_cobrar: cuánto deben / falta cobrar. ventas_periodo: cuánto se vendió en un período. trabajos_cliente: qué trabajos tiene un cliente.\n`
+    + `- "cliente": nombre si lo menciona, si no null.\n`
+    + `- "periodo": "hoy" | "semana" | "mes" | null.`;
 }
 
 router.post('/mensaje', async (req, res) => {
@@ -157,7 +218,7 @@ router.post('/mensaje', async (req, res) => {
   if (esSalir(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: '👍 Cuando quieras.' }); }
   if (esSaludo(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: await menuTexto() }); }
 
-  // Diálogo de actualización en curso (prioridad)
+  // Diálogo guiado de actualización (cuando pediste la lista)
   if (ctx.estado === 'eligiendo') {
     const lista = (ctx.datos && ctx.datos.lista) || [];
     const listaTxt = lista.map((x) => `${x.n}) #${x.id} ${x.cliente} ${x.descripcion || ''}`).join('; ');
@@ -165,41 +226,29 @@ router.post('/mensaje', async (req, res) => {
     const item = lista.find((x) => x.n == d.n);
     if (!item) return res.json({ reply: 'No entendí a cuál. Decime el número, ej: "el 1 se terminó". (o "menu")' });
     await aplicar(item.id, { finalizado: d.finalizado === true, pagado: d.pagado, facturado: d.facturado });
-    if (d.finalizado === true && d.pagado !== true && d.pagado !== false) {
-      await setCtx(from, 'preg_cobro', { trabajo_id: item.id, n: item.n, facturado: d.facturado });
-      return res.json({ reply: `Anotado ✍️ ¿El ${item.n} (#${item.id}) quedó cobrado? (sí/no)` });
-    }
-    if (d.finalizado === true && d.facturado !== true && d.facturado !== false) {
-      await setCtx(from, 'preg_factura', { trabajo_id: item.id });
-      return res.json({ reply: '¿Y quedó facturado? (sí/no)' });
-    }
-    await setCtx(from, 'idle', {});
-    return res.json({ reply: `✅ Listo #${item.id}.` });
+    if (d.finalizado === true && d.pagado !== true && d.pagado !== false) { await setCtx(from, 'preg_cobro', { trabajo_id: item.id, n: item.n, facturado: d.facturado }); return res.json({ reply: `Anotado ✍️ ¿El ${item.n} (#${item.id}) quedó cobrado? (sí/no)` }); }
+    if (d.finalizado === true && d.facturado !== true && d.facturado !== false) { await setCtx(from, 'preg_factura', { trabajo_id: item.id }); return res.json({ reply: '¿Y quedó facturado? (sí/no)' }); }
+    await setCtx(from, 'idle', {}); return res.json({ reply: `✅ Listo #${item.id}.` });
   }
   if (ctx.estado === 'preg_cobro') {
     const v = esSi(t) ? true : esNo(t) ? false : null;
     if (v === null) return res.json({ reply: 'Respondé sí o no 🙂 ¿Quedó cobrado?' });
     await aplicar(ctx.datos.trabajo_id, { pagado: v });
-    if (ctx.datos.facturado !== true && ctx.datos.facturado !== false) {
-      await setCtx(from, 'preg_factura', { trabajo_id: ctx.datos.trabajo_id });
-      return res.json({ reply: '¿Y quedó facturado? (sí/no)' });
-    }
-    await setCtx(from, 'idle', {});
-    return res.json({ reply: `✅ Listo #${ctx.datos.trabajo_id}.` });
+    if (ctx.datos.facturado !== true && ctx.datos.facturado !== false) { await setCtx(from, 'preg_factura', { trabajo_id: ctx.datos.trabajo_id }); return res.json({ reply: '¿Y quedó facturado? (sí/no)' }); }
+    await setCtx(from, 'idle', {}); return res.json({ reply: `✅ Listo #${ctx.datos.trabajo_id}.` });
   }
   if (ctx.estado === 'preg_factura') {
     const v = esSi(t) ? true : esNo(t) ? false : null;
     if (v === null) return res.json({ reply: 'Respondé sí o no. ¿Quedó facturado?' });
     await aplicar(ctx.datos.trabajo_id, { facturado: v });
-    await setCtx(from, 'idle', {});
-    return res.json({ reply: `✅ Listo #${ctx.datos.trabajo_id}, actualizado.` });
+    await setCtx(from, 'idle', {}); return res.json({ reply: `✅ Listo #${ctx.datos.trabajo_id}, actualizado.` });
   }
 
   if (esOpcion(1)) return res.json({ reply: await listarActivos(from) });
   if (esOpcion(2)) return res.json({ reply: await listarBandeja() });
   if (esOpcion(3)) return res.json({ reply: await listarSinPresup() });
 
-  // Router + Normalizador con contexto del negocio
+  // Router con contexto
   const ctxNegocio = await contextoClientes();
   const d = await ollamaJSON(promptClasificar(texto, ctxNegocio));
   const intent = d.intencion || 'nuevo_trabajo';
@@ -214,8 +263,39 @@ router.post('/mensaje', async (req, res) => {
     if (!r) return res.json({ reply: 'No hay borradores pendientes. Mandame un pedido o preguntame qué tenés.' });
     return res.json({ reply: r.accion === 'descartado' ? `🗑 Descartado #${r.id}` : `✅ Confirmado #${r.id} (${r.cliente})` });
   }
+
+  if (intent === 'consulta') {
+    const q = await ollamaJSON(promptConsulta(texto));
+    return res.json({ reply: await responderConsulta(q) });
+  }
+
+  if (intent === 'actualizar_trabajo') {
+    const lista = (ctx.datos && ctx.datos.lista) || [];
+    const listaTxt = lista.map((x) => `${x.n}) #${x.id} ${x.cliente}`).join('; ');
+    const u = await ollamaJSON(promptActualizar(texto, listaTxt));
+    const ref = await resolverRef(u, ctx);
+    if (ref.multiple) return res.json({ reply: `Hay varios de "${u.ref_cliente}": ${ref.multiple.map((x) => '#' + x).join(', ')}. ¿Cuál? Decime el #número.` });
+    if (!ref.id) return res.json({ reply: 'No supe a qué trabajo te referís. Decime el #número o el nombre del cliente.' });
+    const cambios = {};
+    if (ESTADOS.includes(u.estado)) cambios.estado = u.estado;
+    if (u.pagado === true || u.pagado === false) cambios.pagado = u.pagado;
+    if (u.facturado === true || u.facturado === false) cambios.facturado = u.facturado;
+    if (typeof u.precio === 'number' && u.precio > 0) cambios.precio = u.precio;
+    if (DISCIPLINAS.includes(u.disciplina)) cambios.disciplina = u.disciplina;
+    const tr = await aplicar(ref.id, cambios);
+    if (!tr) return res.json({ reply: 'No entendí qué cambiar. Ej: "poné el 3 en espera" o "el de Andreu se cobró".' });
+    const partes = [];
+    if (cambios.estado) partes.push(LBL_ESTADO[cambios.estado]);
+    if (cambios.pagado === true) partes.push('cobrado'); if (cambios.pagado === false) partes.push('sin cobrar');
+    if (cambios.facturado === true) partes.push('facturado'); if (cambios.facturado === false) partes.push('sin facturar');
+    if (cambios.precio) partes.push(money(cambios.precio));
+    if (cambios.disciplina) partes.push(cambios.disciplina);
+    return res.json({ reply: `✅ #${tr.id} ${tr.cliente}: ${partes.join(', ') || 'actualizado'}.` });
+  }
+
+  // nuevo_trabajo (o fallback)
   const tr = await crearBorradorDesde(d);
-  return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — $${tr.precio}. Respondé "ok" para confirmar o "no" para descartar.` });
+  return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar o "no" para descartar.` });
 });
 
 router.get('/nudge', async (req, res) => {
