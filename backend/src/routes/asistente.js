@@ -16,9 +16,10 @@ const WAHA_API_KEY = process.env.WAHA_API_KEY || '';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:14b';
-// keep_alive: el modelo queda cargado en la GPU entre mensajes. Sin esto, Ollama lo
-// descarga a los ~5 min y cada mensaje nuevo paga la recarga completa a VRAM.
-const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '24h';
+// keep_alive: cuánto queda el modelo cargado en la GPU después del último mensaje.
+// 30m = balance: rápido en conversación, y libera la VRAM cuando nadie usa el asistente.
+// Subilo (ej: '24h') si la GPU es dedicada, bajalo (ej: '5m') si la usás mucho para otra cosa.
+const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
 const LBL_ESTADO = { cotizar: 'por cotizar', presupuestado: 'presupuestado', pedido: 'pedido', en_progreso: 'en progreso', en_espera: 'en espera', finalizado: 'finalizado' };
 const AUTORIZADOS = (process.env.AUTORIZADOS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
@@ -95,6 +96,24 @@ const SCHEMA = {
     type: 'object',
     properties: { nombre: NUL('string') },
     required: ['nombre'],
+  },
+  corregirCheque: {
+    type: 'object',
+    properties: {
+      corrige: { type: 'boolean' },
+      tipo: NUL('string'), modalidad: NUL('string'), importe: NUL('integer'),
+      banco: NUL('string'), relacionado: NUL('string'), fecha_cobro: NUL('string'),
+    },
+    required: ['corrige', 'tipo', 'modalidad', 'importe', 'banco', 'relacionado', 'fecha_cobro'],
+  },
+  corregirTrabajo: {
+    type: 'object',
+    properties: {
+      corrige: { type: 'boolean' },
+      empresa: NUL('string'), contacto: NUL('string'), descripcion: NUL('string'),
+      disciplina: NUL('string'), precio: NUL('integer'),
+    },
+    required: ['corrige', 'empresa', 'contacto', 'descripcion', 'disciplina', 'precio'],
   },
 };
 
@@ -235,6 +254,45 @@ async function confirmarBorrador(accion, id) {
   }
   const { rows } = await query('UPDATE trabajos SET revisado = TRUE, actualizado_en = now() WHERE id = $1 RETURNING cliente', [id]);
   return rows[0] ? { accion: 'confirmado', id, cliente: rows[0].cliente } : null;
+}
+
+// ---- Correcciones sobre un borrador que espera confirmación ----
+async function aplicarCorreccionCheque(id, c) {
+  const sets = []; const vals = [];
+  const put = (campo, v) => { vals.push(v); sets.push(`${campo} = $${vals.length}`); };
+  if (c.tipo === 'recibido' || c.tipo === 'emitido') put('tipo', c.tipo);
+  if (c.modalidad === 'fisico' || c.modalidad === 'electronico') put('modalidad', c.modalidad);
+  if (typeof c.importe === 'number' && c.importe > 0) put('importe', c.importe);
+  if (c.banco) put('banco', c.banco);
+  if (c.relacionado) put('relacionado', c.relacionado);
+  if (fechaValida(c.fecha_cobro)) put('fecha_cobro', c.fecha_cobro);
+  if (!sets.length) return null;
+  vals.push(id);
+  const { rows } = await query(`UPDATE cheques SET ${sets.join(', ')} WHERE id = $${vals.length} AND revisado = FALSE RETURNING *`, vals);
+  if (rows[0]) await audit(null, 'corregir', 'cheque', id, c);
+  return rows[0];
+}
+async function aplicarCorreccionTrabajo(id, c) {
+  const sets = []; const vals = [];
+  const put = (campo, v) => { vals.push(v); sets.push(`${campo} = $${vals.length}`); };
+  if (c.descripcion) put('descripcion', c.descripcion);
+  if (DISCIPLINAS.includes(c.disciplina)) put('disciplina', c.disciplina);
+  if (typeof c.precio === 'number' && c.precio > 0) put('precio', c.precio);
+  if ((c.contacto && c.contacto.trim()) || (c.empresa && c.empresa.trim())) {
+    const empresaId = (c.empresa && c.empresa.trim()) ? await resolverEmpresa(c.empresa.trim(), 'ia') : null;
+    const contactoId = (c.contacto && c.contacto.trim()) ? await resolverContacto(c.contacto.trim(), empresaId, 'ia') : null;
+    const cliente = (c.contacto && c.contacto.trim())
+      ? (c.contacto.trim() + (c.empresa && c.empresa.trim() ? ` (${c.empresa.trim()})` : ''))
+      : c.empresa.trim();
+    if (empresaId) put('empresa_id', empresaId);
+    if (contactoId) put('contacto_id', contactoId);
+    put('cliente', cliente);
+  }
+  if (!sets.length) return null;
+  vals.push(id);
+  const { rows } = await query(`UPDATE trabajos SET ${sets.join(', ')}, actualizado_en = now() WHERE id = $${vals.length} AND revisado = FALSE RETURNING *`, vals);
+  if (rows[0]) await audit(null, 'corregir', 'trabajo', id, c);
+  return rows[0];
 }
 
 // ---- Editar hablando: resolver referencia y aplicar ----
@@ -488,7 +546,7 @@ function promptConsulta(texto) {
 }
 function promptCheque(texto) {
   return `Hoy es ${hoyISO()}. El usuario registra un CHEQUE del taller. Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
-    + `- "tipo": "recibido" (se lo dan / le pagan con cheque) o "emitido" (él lo entrega para pagar).\n`
+    + `- "tipo": "recibido" si SE LO DAN a él / le pagan / lo va a cobrar ("me dieron un cheque", "nos pagaron con e-check", "a cobrar", "entra"). "emitido" si ÉL LO ENTREGA o lo usa para pagar ("le di un cheque", "pagué con e-check", "a pagar", "para pagarle a X", "sale"). Si no está claro, "recibido".\n`
     + `- "modalidad": "electronico" si menciona e-check, echeck, cheque electrónico o digital; si no, "fisico" (cheque de papel).\n`
     + `- "importe": entero en pesos (lucas=miles, palo=millón, gamba=100), 0 si no dice.\n`
     + `- "banco": nombre del banco o null.\n`
@@ -508,6 +566,19 @@ function promptCompra(texto) {
 }
 function promptNombre(texto, que) {
   return `El usuario dice que ${que}. Dijo: "${texto}".\nDevolvé SOLO JSON: "nombre" = el nombre, cliente, proveedor, concepto o insumo al que se refiere (o null si no lo dice).`;
+}
+function promptCorregirCheque(original, correccion) {
+  return `Anotaste un CHEQUE a partir de: "${original}". Le pediste confirmación (ok/no) y el usuario respondió: "${correccion}".\n`
+    + `¿Está corrigiendo algún dato del cheque? Devolvé SOLO JSON:\n`
+    + `- "corrige": true si corrige algo del cheque; false si habla de OTRA cosa (otro pedido, una consulta, un saludo).\n`
+    + `- Campos SOLO con lo corregido (lo que no menciona: null): "tipo" ("recibido" si lo cobra él / se lo dieron / a cobrar; "emitido" si lo paga o entrega él / "a pagar"), "modalidad" (fisico|electronico), "importe" (entero en pesos, lucas=miles), "banco", "relacionado" (cliente o proveedor), "fecha_cobro" (YYYY-MM-DD, hoy es ${hoyISO()}).\n`
+    + `OJO: si dice "a pagar" o "es para pagar" está corrigiendo tipo=emitido; NO es un pago de servicio.`;
+}
+function promptCorregirTrabajo(original, correccion) {
+  return `Anotaste un TRABAJO a partir de: "${original}". Le pediste confirmación (ok/no) y el usuario respondió: "${correccion}".\n`
+    + `¿Está corrigiendo algún dato del trabajo? Devolvé SOLO JSON:\n`
+    + `- "corrige": true si corrige algo del trabajo; false si habla de otra cosa.\n`
+    + `- Campos SOLO con lo corregido (lo que no menciona: null): "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo|impresion), "precio" (entero en pesos, lucas=miles).`;
 }
 
 router.post('/mensaje', async (req, res) => {
@@ -548,14 +619,14 @@ router.post('/mensaje', async (req, res) => {
         const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
         const ch = await crearCheque(c);
         await adjuntar('cheque', ch.id, archivo, mime, texto);
-        await setCtx(from, 'idle', { pendiente: { tipo: 'cheque', id: ch.id } });
-        return res.json({ reply: `🧾📎 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)} con la foto adjunta.\nRespondé "ok" para confirmarlo o "no" para descartarlo.` });
+        await setCtx(from, 'confirmando', { pendiente: { tipo: 'cheque', id: ch.id, texto } });
+        return res.json({ reply: `🧾📎 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)} con la foto adjunta.\nRespondé "ok" para confirmarlo, "no" para descartarlo, o corregime (ej: "es a pagar", "son 250 lucas").` });
       }
       if (clasif.intencion === 'nuevo_trabajo') {
         const tr = await crearBorradorDesde(clasif);
         await adjuntar('trabajo', tr.id, archivo, mime, texto);
-        await setCtx(from, 'idle', { pendiente: { tipo: 'trabajo', id: tr.id } });
-        return res.json({ reply: `🆕📎 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} con la foto adjunta.\nRespondé "ok" para confirmar o "no" para descartar.` });
+        await setCtx(from, 'confirmando', { pendiente: { tipo: 'trabajo', id: tr.id, texto } });
+        return res.json({ reply: `🆕📎 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} con la foto adjunta.\nRespondé "ok" para confirmar, "no" para descartar, o corregime (ej: "el precio es 50 lucas").` });
       }
     }
 
@@ -610,6 +681,33 @@ router.post('/mensaje', async (req, res) => {
     if (v === null) return res.json({ reply: 'Respondé sí o no. ¿Quedó facturado?' });
     await aplicar(ctx.datos.trabajo_id, { facturado: v });
     await setCtx(from, 'idle', {}); return res.json({ reply: `✅ Listo #${ctx.datos.trabajo_id}, actualizado.` });
+  }
+
+  // ---- Corrección de un borrador que espera confirmación ("es a pagar", "son 250 lucas") ----
+  if (ctx.estado === 'confirmando' && ctx.datos && ctx.datos.pendiente && ctx.datos.pendiente.id && !esSi(t) && !esNo(t)) {
+    const pend = ctx.datos.pendiente;
+    const memo = (txt) => ((pend.texto || '') + ' | ' + txt).slice(-500);
+    if (pend.tipo === 'cheque') {
+      const c = await ollamaJSON(promptCorregirCheque(pend.texto || '', texto), SCHEMA.corregirCheque);
+      if (c && c.corrige) {
+        const ch = await aplicarCorreccionCheque(pend.id, c);
+        if (ch) {
+          await setCtx(from, 'confirmando', { pendiente: { ...pend, texto: memo(texto) } });
+          return res.json({ reply: `🧾 Corregido: cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)}${ch.fecha_cobro ? ` (${fmtFecha(ch.fecha_cobro)})` : ''}.\nRespondé "ok" para confirmarlo, "no" para descartarlo, o corregime de nuevo.` });
+        }
+      }
+    }
+    if (pend.tipo === 'trabajo') {
+      const c = await ollamaJSON(promptCorregirTrabajo(pend.texto || '', texto), SCHEMA.corregirTrabajo);
+      if (c && c.corrige) {
+        const tr = await aplicarCorreccionTrabajo(pend.id, c);
+        if (tr) {
+          await setCtx(from, 'confirmando', { pendiente: { ...pend, texto: memo(texto) } });
+          return res.json({ reply: `🆕 Corregido #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}.\nRespondé "ok" para confirmar, "no" para descartar, o corregime de nuevo.` });
+        }
+      }
+    }
+    // No era una corrección: sigue el flujo normal (consulta, otro pedido, etc.)
   }
 
   // Atajo: "ok"/"no" sobre un borrador recién anotado → resolver sin llamar a la IA.
@@ -702,8 +800,8 @@ router.post('/mensaje', async (req, res) => {
   if (intent === 'nuevo_cheque') {
     const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
     const ch = await crearCheque(c);
-    await setCtx(from, 'idle', { pendiente: { tipo: 'cheque', id: ch.id } });
-    return res.json({ reply: `🧾 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)}${ch.fecha_cobro ? `, ${fmtFecha(ch.fecha_cobro)}` : ''}.\nRespondé "ok" para confirmarlo o "no" para descartarlo.` });
+    await setCtx(from, 'confirmando', { pendiente: { tipo: 'cheque', id: ch.id, texto } });
+    return res.json({ reply: `🧾 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)}${ch.fecha_cobro ? `, ${fmtFecha(ch.fecha_cobro)}` : ''}.\nRespondé "ok" para confirmarlo, "no" para descartarlo, o corregime (ej: "es a pagar", "son 250 lucas").` });
   }
   if (intent === 'cheque_cobrado') {
     const r = await ollamaJSON(promptNombre(texto, 'cobró un cheque'), SCHEMA.refNombre);
@@ -739,8 +837,8 @@ router.post('/mensaje', async (req, res) => {
 
   // nuevo_trabajo (o fallback)
   const tr = await crearBorradorDesde(d);
-  await setCtx(from, 'idle', { pendiente: { tipo: 'trabajo', id: tr.id } });
-  return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar o "no" para descartar.` });
+  await setCtx(from, 'confirmando', { pendiente: { tipo: 'trabajo', id: tr.id, texto } });
+  return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar, "no" para descartar, o corregime (ej: "el precio es 50 lucas").` });
  } catch (e) {
    console.error('mensaje error:', e.message);
    if (!res.headersSent) res.json({ reply: '🤖 Uf, tuve un problema con eso. Probá de nuevo en un ratito.' });

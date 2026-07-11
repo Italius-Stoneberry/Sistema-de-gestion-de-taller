@@ -43,8 +43,9 @@ services:
       INGEST_API_KEY: ${INGEST_API_KEY}
       OLLAMA_URL: http://host.docker.internal:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
-      # Cuánto tiempo queda el modelo cargado en la GPU entre mensajes (latencia mucho menor).
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
+      # Cuánto queda el modelo en la GPU tras el último mensaje. 30m libera la placa
+      # cuando nadie usa el asistente; subilo a 24h si la GPU es dedicada al taller.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       AUTORIZADOS: ${AUTORIZADOS:-}
       # Para bajar imágenes que llegan por WhatsApp (fotos de cheques, referencias, etc.)
       WAHA_URL: ${WAHA_URL:-http://host.docker.internal:3001}
