@@ -20,6 +20,11 @@ import comprasRoutes from './routes/compras.js';
 import adjuntosRoutes from './routes/adjuntos.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Red de seguridad: que un error suelto no tumbe todo el proceso.
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', (e && e.message) || e));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', (e && e.message) || e));
+
 const app = express();
 app.use(express.json());
 

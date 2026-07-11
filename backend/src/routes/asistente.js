@@ -499,8 +499,9 @@ function promptNombre(texto, que) {
 }
 
 router.post('/mensaje', async (req, res) => {
-  const from = (req.body && req.body.from) || '';
-  const texto = ((req.body && req.body.texto) || '').trim();
+ try {
+  const from = (req.body && req.body.from != null) ? String(req.body.from) : '';
+  const texto = (req.body && typeof req.body.texto === 'string') ? req.body.texto.trim() : '';
   if (!from) return res.status(400).json({ error: 'Falta from' });
   if (AUTORIZADOS.length && !AUTORIZADOS.includes(from)) return res.json({ reply: null, ignorado: true });
 
@@ -704,6 +705,10 @@ router.post('/mensaje', async (req, res) => {
   const tr = await crearBorradorDesde(d);
   await setCtx(from, 'idle', { pendiente: { tipo: 'trabajo', id: tr.id } });
   return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar o "no" para descartar.` });
+ } catch (e) {
+   console.error('mensaje error:', e.message);
+   if (!res.headersSent) res.json({ reply: '🤖 Uf, tuve un problema con eso. Probá de nuevo en un ratito.' });
+ }
 });
 
 router.get('/nudge', async (req, res) => {
