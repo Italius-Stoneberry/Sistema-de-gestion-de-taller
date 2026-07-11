@@ -503,7 +503,11 @@ router.post('/mensaje', async (req, res) => {
   const from = (req.body && req.body.from != null) ? String(req.body.from) : '';
   const texto = (req.body && typeof req.body.texto === 'string') ? req.body.texto.trim() : '';
   if (!from) return res.status(400).json({ error: 'Falta from' });
-  if (AUTORIZADOS.length && !AUTORIZADOS.includes(from)) return res.json({ reply: null, ignorado: true });
+  // SEGURIDAD: el asistente corre sobre la línea del taller, que también recibe mensajes de clientes.
+  // Solo responde a los números/IDs de la familia. Lista VACÍA = no responde a NADIE (fail-safe).
+  const fromNum = String(from).split('@')[0];
+  const autorizado = AUTORIZADOS.length > 0 && (AUTORIZADOS.includes(String(from)) || AUTORIZADOS.includes(fromNum));
+  if (!autorizado) { console.log('WA ignorado (no autorizado):', from); return res.json({ reply: null, ignorado: true }); }
 
   const t = texto.toLowerCase();
   const ctx = await getCtx(from);
