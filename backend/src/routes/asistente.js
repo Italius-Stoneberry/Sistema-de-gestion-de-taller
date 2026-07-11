@@ -13,6 +13,14 @@ const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera
 const LBL_ESTADO = { cotizar: 'por cotizar', presupuestado: 'presupuestado', pedido: 'pedido', en_progreso: 'en progreso', en_espera: 'en espera', finalizado: 'finalizado' };
 const AUTORIZADOS = (process.env.AUTORIZADOS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
+const hoyISO = () => new Date().toISOString().slice(0, 10);
+const fechaValida = (s) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s : null;
+function fmtFecha(d) {
+  if (!d) return '';
+  const s = (d instanceof Date) ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
+  const p = s.split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}` : s;
+}
 
 // Esquemas JSON: obligan a qwen3 a LLENAR los campos (con format:"json" a secas
 // devuelve {} vacío). Los campos nullable usan type ["...","null"] y van en required
@@ -22,7 +30,7 @@ const SCHEMA = {
   clasificar: {
     type: 'object',
     properties: {
-      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar'] },
+      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar', 'nuevo_cheque', 'ver_cheques', 'cheque_cobrado', 'nuevo_pago', 'ver_pagos', 'pago_hecho', 'nueva_compra', 'ver_compras', 'compra_hecha'] },
       id: NUL('integer'), empresa: NUL('string'), contacto: NUL('string'),
       descripcion: NUL('string'), disciplina: NUL('string'), precio: NUL('integer'),
     },
@@ -51,6 +59,32 @@ const SCHEMA = {
       n: NUL('integer'), finalizado: NUL('boolean'), pagado: NUL('boolean'), facturado: NUL('boolean'),
     },
     required: ['n', 'finalizado', 'pagado', 'facturado'],
+  },
+  cheque: {
+    type: 'object',
+    properties: {
+      tipo: { type: 'string', enum: ['recibido', 'emitido'] },
+      importe: NUL('integer'), banco: NUL('string'),
+      relacionado: NUL('string'), fecha_cobro: NUL('string'),
+    },
+    required: ['tipo', 'importe'],
+  },
+  pago: {
+    type: 'object',
+    properties: {
+      concepto: { type: 'string' }, importe: NUL('integer'), fecha_vencimiento: NUL('string'),
+    },
+    required: ['concepto'],
+  },
+  compra: {
+    type: 'object',
+    properties: { item: { type: 'string' }, cantidad: NUL('string') },
+    required: ['item'],
+  },
+  refNombre: {
+    type: 'object',
+    properties: { nombre: NUL('string') },
+    required: ['nombre'],
   },
 };
 
@@ -98,7 +132,7 @@ async function contar() {
 }
 async function menuTexto() {
   const c = await contar();
-  return `🤖 ¡Buenas! Tenés:\n• ${c.activos} trabajos en curso\n• ${c.bandeja} en la bandeja sin confirmar\n• ${c.sin_presup} sin presupuestar\n\nPreguntame lo que quieras, o mandame/actualizá pedidos hablando normal.`;
+  return `🤖 ¡Buenas! Tenés:\n• ${c.activos} trabajos en curso\n• ${c.bandeja} en la bandeja sin confirmar\n• ${c.sin_presup} sin presupuestar\n\nHablame normal: cargá pedidos, actualizá estados, anotá cheques ("me dieron un cheque de X"), pagos ("hay que pagar la luz") o compras ("falta tinta"). También preguntame "qué me deben", "ver cheques", "ver compras".`;
 }
 async function listarActivos(chatId) {
   const { rows } = await query(`SELECT id, cliente, descripcion, estado FROM trabajos WHERE estado IN ('pedido','en_progreso','en_espera') AND revisado ORDER BY actualizado_en ASC LIMIT 8`);
@@ -211,6 +245,92 @@ async function responderConsulta(q) {
   return 'No pude armar esa consulta. Probá: "cuánto le facturé a Andreu", "qué me deben", "cuánto vendí este mes", "trabajos de Ramiro".';
 }
 
+// ---- Cheques ----
+async function crearCheque(d) {
+  const tipo = d.tipo === 'emitido' ? 'emitido' : 'recibido';
+  const { rows } = await query(
+    `INSERT INTO cheques (tipo, banco, importe, fecha_cobro, estado, relacionado, origen, revisado)
+     VALUES ($1,$2,$3,$4,'pendiente',$5,'ia',TRUE) RETURNING *`,
+    [tipo, d.banco || null, Number(d.importe) || 0, fechaValida(d.fecha_cobro), d.relacionado || null]);
+  await audit(null, 'asistente', 'cheque', rows[0].id, null);
+  return rows[0];
+}
+async function listarCheques() {
+  const { rows } = await query(`SELECT id, tipo, importe, relacionado, fecha_cobro FROM cheques WHERE estado='pendiente' ORDER BY fecha_cobro NULLS LAST, id LIMIT 12`);
+  if (!rows.length) return 'No hay cheques pendientes 👍';
+  return 'Cheques pendientes:\n' + rows.map((r) => `#${r.id} ${r.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${r.relacionado || '—'} ${money(r.importe)}${r.fecha_cobro ? ` (${fmtFecha(r.fecha_cobro)})` : ''}`).join('\n') + '\n\nDecime "cobré el cheque de X" cuando entre.';
+}
+async function marcarChequeCobrado(nombre) {
+  const cond = nombre ? `relacionado ILIKE '%'||$1||'%'` : 'TRUE';
+  const args = nombre ? [nombre] : [];
+  const { rows } = await query(
+    `UPDATE cheques SET estado='cobrado' WHERE id=(SELECT id FROM cheques WHERE estado='pendiente' AND ${cond} ORDER BY fecha_cobro NULLS LAST, id LIMIT 1) RETURNING *`, args);
+  if (rows[0]) await audit(null, 'asistente', 'cheque', rows[0].id, { estado: 'cobrado' });
+  return rows[0];
+}
+
+// ---- Pagos de servicios / gastos fijos ----
+async function crearPago(d) {
+  const { rows } = await query(
+    `INSERT INTO pagos_servicios (concepto, importe, fecha_vencimiento, estado, origen, revisado)
+     VALUES ($1,$2,$3,'pendiente','ia',TRUE) RETURNING *`,
+    [d.concepto || 'gasto', Number(d.importe) || 0, fechaValida(d.fecha_vencimiento)]);
+  await audit(null, 'asistente', 'pago', rows[0].id, null);
+  return rows[0];
+}
+async function listarPagos() {
+  const { rows } = await query(`SELECT id, concepto, importe, fecha_vencimiento FROM pagos_servicios WHERE estado='pendiente' ORDER BY fecha_vencimiento NULLS LAST, id LIMIT 12`);
+  if (!rows.length) return 'No hay pagos pendientes 👍';
+  return 'Pagos pendientes:\n' + rows.map((r) => `#${r.id} ${r.concepto} ${money(r.importe)}${r.fecha_vencimiento ? ` (vence ${fmtFecha(r.fecha_vencimiento)})` : ''}`).join('\n') + '\n\nDecime "pagué la luz" cuando lo saldes.';
+}
+async function marcarPagoHecho(nombre) {
+  const cond = nombre ? `concepto ILIKE '%'||$1||'%'` : 'TRUE';
+  const args = nombre ? [nombre] : [];
+  const { rows } = await query(
+    `UPDATE pagos_servicios SET estado='pagado' WHERE id=(SELECT id FROM pagos_servicios WHERE estado='pendiente' AND ${cond} ORDER BY fecha_vencimiento NULLS LAST, id LIMIT 1) RETURNING *`, args);
+  if (rows[0]) await audit(null, 'asistente', 'pago', rows[0].id, { estado: 'pagado' });
+  return rows[0];
+}
+
+// ---- Lista de compras ----
+async function crearCompra(d) {
+  const { rows } = await query(
+    `INSERT INTO lista_compras (item, cantidad, origen) VALUES ($1,$2,'ia') RETURNING *`,
+    [(d.item || '').trim() || 'insumo', d.cantidad || null]);
+  return rows[0];
+}
+async function listarCompras() {
+  const { rows } = await query(`SELECT item, cantidad FROM lista_compras WHERE NOT comprado ORDER BY creado_en LIMIT 30`);
+  if (!rows.length) return 'La lista de compras está vacía 👍';
+  return '🛒 Lista de compras:\n' + rows.map((r) => `• ${r.item}${r.cantidad ? ` (${r.cantidad})` : ''}`).join('\n') + '\n\nDecime "ya compré X" para tacharlo.';
+}
+async function marcarCompraHecha(nombre) {
+  const cond = nombre ? `item ILIKE '%'||$1||'%'` : 'TRUE';
+  const args = nombre ? [nombre] : [];
+  const { rows } = await query(
+    `UPDATE lista_compras SET comprado=TRUE WHERE id=(SELECT id FROM lista_compras WHERE NOT comprado AND ${cond} ORDER BY creado_en LIMIT 1) RETURNING *`, args);
+  return rows[0];
+}
+
+// ---- Secretario proactivo: resumen de pendientes ----
+async function nudgeTexto() {
+  const c = await contar();
+  const q = async (sql) => (await query(sql)).rows[0];
+  const chq = await q(`SELECT COUNT(*)::int n, COALESCE(SUM(importe),0) t FROM cheques WHERE estado='pendiente' AND fecha_cobro IS NOT NULL AND fecha_cobro <= CURRENT_DATE + INTERVAL '5 days'`);
+  const pag = await q(`SELECT COUNT(*)::int n FROM pagos_servicios WHERE estado='pendiente' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= CURRENT_DATE + INTERVAL '5 days'`);
+  const esp = await q(`SELECT COUNT(*)::int n FROM trabajos WHERE estado='en_espera' AND revisado`);
+  const comp = await q(`SELECT COUNT(*)::int n FROM lista_compras WHERE NOT comprado`);
+  const L = ['🤖 ¿Cómo venís? Te recuerdo lo que hay:'];
+  L.push(`• ${c.activos} trabajo(s) en curso${esp.n ? `, ${esp.n} en espera` : ''}`);
+  if (c.bandeja) L.push(`• ${c.bandeja} en la bandeja sin confirmar`);
+  if (c.sin_presup) L.push(`• ${c.sin_presup} sin presupuestar`);
+  if (chq.n) L.push(`• ${chq.n} cheque(s) por cobrar pronto (${money(chq.t)})`);
+  if (pag.n) L.push(`• ${pag.n} pago(s) por vencer`);
+  if (comp.n) L.push(`• 🛒 ${comp.n} cosa(s) en la lista de compras`);
+  L.push('\n¿Algún trabajo avanzó o cobraste algo? Contame y lo actualizo. 👍');
+  return L.join('\n');
+}
+
 const esSi = (t) => /^(s[ií]|dale|obvio|sip|yes|ya|listo)\b/i.test(t);
 const esNo = (t) => /^(no|nop|todav[ií]a|a[uú]n no|negativo)\b/i.test(t);
 const esSaludo = (t) => ['hola', 'menu', 'menú', 'inicio', 'buenas', 'empezar', 'buen dia'].includes(t);
@@ -219,15 +339,22 @@ const esSalir = (t) => ['salir', 'chau', 'gracias', 'nada'].includes(t);
 function promptClasificar(texto, ctxNegocio) {
   return `Sos el asistente de un taller gráfico. Interpretás WhatsApp informal (jerga argentina).\n\n${ctxNegocio}\n\n`
     + `El usuario escribió: "${texto}".\nDevolvé SOLO un JSON con:\n`
-    + `- "intencion": [nuevo_trabajo, actualizar_trabajo, consulta, ver_activos, ver_bandeja, ver_sin_presupuestar, resumen, confirmar, descartar].\n`
+    + `- "intencion": una de las de la lista.\n`
     + `- "id": número de trabajo si menciona uno (#5), si no null.\n`
     + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo), "precio" (entero, 0 si no hay).\n\n`
     + `Cómo elegir la intención:\n`
-    + `- nuevo_trabajo: encarga algo por primera vez (cliente + cantidad/producto). Ej: "ramiro quiere 100 volantes".\n`
-    + `- actualizar_trabajo: informa un cambio sobre un trabajo YA existente (se terminó/cobró/facturó, cambiar estado/precio/disciplina). Ej: "el de andreu se entregó", "poné el 3 en espera", "cambiá el precio del 5".\n`
-    + `- consulta: pregunta datos. Ej: "cuánto le facturé a X", "qué me deben", "cuánto vendí este mes", "trabajos de X".\n`
+    + `- nuevo_trabajo: encarga un TRABAJO por primera vez (cliente + cantidad/producto). Ej: "ramiro quiere 100 volantes".\n`
+    + `- actualizar_trabajo: cambio sobre un trabajo YA existente (se terminó/cobró/facturó, cambiar estado/precio/disciplina, presupuestar). Ej: "el de andreu se entregó", "poné el 3 en espera", "presupuestá el 5 en 40 lucas".\n`
+    + `- consulta: pregunta datos de plata/trabajos. Ej: "cuánto le facturé a X", "qué me deben", "cuánto vendí este mes", "trabajos de X".\n`
+    + `- nuevo_cheque: menciona un CHEQUE que recibió o entregó. Ej: "me dieron un cheque de andreu por 200 lucas a 30 días".\n`
+    + `- ver_cheques: quiere ver los cheques pendientes. cheque_cobrado: un cheque ya se cobró/depositó ("cobré el cheque de X", "entró el cheque").\n`
+    + `- nuevo_pago: un SERVICIO o gasto fijo a pagar (luz, gas, alquiler, internet, impuestos, proveedor). Ej: "hay que pagar la luz 30 lucas el viernes".\n`
+    + `- ver_pagos: quiere ver los pagos pendientes. pago_hecho: ya pagó un servicio ("pagué la luz", "ya está el alquiler").\n`
+    + `- nueva_compra: agregar un INSUMO/material a la lista de compras (tinta, vinilo, papel). Ej: "anotá que falta tinta negra".\n`
+    + `- ver_compras: quiere ver la lista de compras. compra_hecha: ya compró un insumo ("compré la tinta", "ya traje los rollos").\n`
     + `- ver_activos / ver_bandeja / ver_sin_presupuestar: pide ver esas listas. resumen: "cómo viene/menú/hola".\n`
     + `- confirmar/descartar: "ok/sí" o "no" a un borrador.\n\n`
+    + `Distinguí bien: pagar un servicio/gasto (nuevo_pago) es distinto de comprar un insumo (nueva_compra). Un cheque siempre lleva la palabra cheque.\n`
     + `Reglas de cliente (usá las listas de arriba): empresa conocida => empresa; contacto conocido => persona; "X de Y" => contacto X, empresa Y; nombre suelto desconocido => contacto (individual), empresa "". Nunca pongas "cliente individual" como nombre; si no hay empresa, empresa: "".\n`
     + `Jerga: lucas=miles (80 lucas=80000), palo=millón, gamba=100.`;
 }
@@ -248,6 +375,28 @@ function promptConsulta(texto) {
     + `  facturado_cliente: cuánto se le facturó/vendió a un cliente. por_cobrar: cuánto deben / falta cobrar. ventas_periodo: cuánto se vendió en un período. trabajos_cliente: qué trabajos tiene un cliente.\n`
     + `- "cliente": nombre si lo menciona, si no null.\n`
     + `- "periodo": "hoy" | "semana" | "mes" | null.`;
+}
+function promptCheque(texto) {
+  return `Hoy es ${hoyISO()}. El usuario registra un CHEQUE del taller. Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
+    + `- "tipo": "recibido" (se lo dan / le pagan con cheque) o "emitido" (él lo entrega para pagar).\n`
+    + `- "importe": entero en pesos (lucas=miles, palo=millón, gamba=100), 0 si no dice.\n`
+    + `- "banco": nombre del banco o null.\n`
+    + `- "relacionado": nombre del cliente (si recibido) o proveedor (si emitido), o null.\n`
+    + `- "fecha_cobro": fecha de cobro/vencimiento en formato YYYY-MM-DD, calculada desde hoy si dice "el viernes", "a 30 días", "el 15", "fin de mes"; null si no la menciona.`;
+}
+function promptPago(texto) {
+  return `Hoy es ${hoyISO()}. El usuario registra un PAGO DE SERVICIO o gasto fijo del taller (luz, gas, agua, alquiler, internet, teléfono, impuestos, un proveedor). Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
+    + `- "concepto": qué se paga (ej: "luz", "alquiler", "internet"), en pocas palabras.\n`
+    + `- "importe": entero en pesos (lucas=miles), 0 si no dice.\n`
+    + `- "fecha_vencimiento": YYYY-MM-DD desde hoy si menciona vencimiento, si no null.`;
+}
+function promptCompra(texto) {
+  return `El usuario agrega algo a la LISTA DE COMPRAS del taller (insumos/materiales: tinta, vinilo, papel, planchas, etc.). Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
+    + `- "item": qué hay que comprar, corto (ej: "tinta negra", "rollos de vinilo").\n`
+    + `- "cantidad": texto libre si la menciona (ej: "2 rollos", "medio kilo"), si no null.`;
+}
+function promptNombre(texto, que) {
+  return `El usuario dice que ${que}. Dijo: "${texto}".\nDevolvé SOLO JSON: "nombre" = el nombre, cliente, proveedor, concepto o insumo al que se refiere (o null si no lo dice).`;
 }
 
 router.post('/mensaje', async (req, res) => {
@@ -339,6 +488,45 @@ router.post('/mensaje', async (req, res) => {
     return res.json({ reply: `✅ #${tr.id} ${tr.cliente}: ${partes.join(', ') || 'actualizado'}.` });
   }
 
+  // ----- Cheques -----
+  if (intent === 'ver_cheques') return res.json({ reply: await listarCheques() });
+  if (intent === 'nuevo_cheque') {
+    const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
+    const ch = await crearCheque(c);
+    return res.json({ reply: `🧾 Cheque anotado: ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)}${ch.fecha_cobro ? `, ${fmtFecha(ch.fecha_cobro)}` : ''}.` });
+  }
+  if (intent === 'cheque_cobrado') {
+    const r = await ollamaJSON(promptNombre(texto, 'cobró un cheque'), SCHEMA.refNombre);
+    const ch = await marcarChequeCobrado(r.nombre);
+    return res.json({ reply: ch ? `✅ Cheque de ${ch.relacionado || '—'} ${money(ch.importe)} marcado como cobrado.` : 'No encontré ese cheque pendiente. Escribí "ver cheques".' });
+  }
+
+  // ----- Pagos de servicios -----
+  if (intent === 'ver_pagos') return res.json({ reply: await listarPagos() });
+  if (intent === 'nuevo_pago') {
+    const p = await ollamaJSON(promptPago(texto), SCHEMA.pago);
+    const pg = await crearPago(p);
+    return res.json({ reply: `💡 Pago anotado: ${pg.concepto} ${money(pg.importe)}${pg.fecha_vencimiento ? `, vence ${fmtFecha(pg.fecha_vencimiento)}` : ''}.` });
+  }
+  if (intent === 'pago_hecho') {
+    const r = await ollamaJSON(promptNombre(texto, 'pagó un servicio o gasto'), SCHEMA.refNombre);
+    const pg = await marcarPagoHecho(r.nombre);
+    return res.json({ reply: pg ? `✅ ${pg.concepto} ${money(pg.importe)} marcado como pagado.` : 'No encontré ese pago pendiente. Escribí "ver pagos".' });
+  }
+
+  // ----- Lista de compras -----
+  if (intent === 'ver_compras') return res.json({ reply: await listarCompras() });
+  if (intent === 'nueva_compra') {
+    const c = await ollamaJSON(promptCompra(texto), SCHEMA.compra);
+    const cp = await crearCompra(c);
+    return res.json({ reply: `🛒 Agregado a la lista: ${cp.item}${cp.cantidad ? ` (${cp.cantidad})` : ''}.` });
+  }
+  if (intent === 'compra_hecha') {
+    const r = await ollamaJSON(promptNombre(texto, 'ya compró un insumo'), SCHEMA.refNombre);
+    const cp = await marcarCompraHecha(r.nombre);
+    return res.json({ reply: cp ? `✅ Tachado de la lista: ${cp.item}.` : 'No encontré ese ítem en la lista. Escribí "ver compras".' });
+  }
+
   // nuevo_trabajo (o fallback)
   const tr = await crearBorradorDesde(d);
   return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar o "no" para descartar.` });
@@ -347,7 +535,7 @@ router.post('/mensaje', async (req, res) => {
 router.get('/nudge', async (req, res) => {
   const to = (req.query.to || '').trim();
   if (to) await setCtx(to, 'idle', {});
-  res.json({ reply: await menuTexto() });
+  res.json({ reply: await nudgeTexto() });
 });
 
 export default router;

@@ -144,3 +144,15 @@ CREATE TABLE IF NOT EXISTS conversaciones (
   datos          JSONB NOT NULL DEFAULT '{}',
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ========== LISTA DE COMPRAS (v1.5) ==========
+CREATE TABLE IF NOT EXISTS lista_compras (
+  id         SERIAL PRIMARY KEY,
+  item       TEXT NOT NULL,
+  cantidad   TEXT,
+  comprado   BOOLEAN NOT NULL DEFAULT FALSE,
+  origen     TEXT NOT NULL DEFAULT 'manual',
+  creado_por INTEGER REFERENCES usuarios(id),
+  creado_en  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_compras_pendientes ON lista_compras(comprado);
