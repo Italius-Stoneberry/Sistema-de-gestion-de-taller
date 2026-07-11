@@ -2,11 +2,10 @@ import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereIngest } from '../auth.js';
 import { resolverEmpresa, resolverContacto } from '../resolvers.js';
+import { DISCIPLINAS } from '../constantes.js';
 
 const router = Router();
 router.use(requiereIngest); // toda la ingesta usa API key (n8n), no login humano
-
-const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
 
 // POST /api/ingesta/trabajo  -> crea un trabajo como BORRADOR (revisado=false) para revisión humana
 router.post('/trabajo', async (req, res) => {

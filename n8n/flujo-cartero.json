@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const p = ($json.body && $json.body.payload) || {};\nconst texto = (p.body || \"\").trim();\nconst chatId = p.from || \"\";\nif (p.fromMe || !texto) return [];\nreturn [{ json: { from: chatId.replace(\"@c.us\",\"\"), texto, chatId } }];"
+        "jsCode": "const p = ($json.body && $json.body.payload) || {};\nconst texto = (p.body || \"\").trim();\nconst chatId = p.from || \"\";\n// Fotos/documentos: WAHA manda la media descargada en payload.media\nconst media = p.media || {};\nconst media_url = media.url || p.mediaUrl || \"\";\nconst mimetype = media.mimetype || p.mimetype || \"\";\n// Antes se descartaban los mensajes sin texto: una foto sola nunca llegaba al backend.\nif (p.fromMe || (!texto && !media_url)) return [];\nreturn [{ json: { from: chatId.replace(\"@c.us\",\"\"), texto, chatId, media_url, mimetype } }];"
       },
       "id": "ex",
       "name": "Extraer",
@@ -47,7 +47,7 @@
         "options": {},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ from: $json.from, texto: $json.texto }) }}"
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, texto: $json.texto, media_url: $json.media_url, mimetype: $json.mimetype }) }}"
       },
       "id": "Cerebro",
       "name": "Cerebro",

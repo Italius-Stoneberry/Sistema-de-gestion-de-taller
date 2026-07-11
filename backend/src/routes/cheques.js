@@ -1,13 +1,11 @@
 import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereAuth, puedeEditar, soloAdmin } from '../auth.js';
+import { CHEQUE_TIPOS as TIPOS, CHEQUE_MODALIDADES as MODALIDADES, CHEQUE_ESTADOS as ESTADOS } from '../constantes.js';
+import { borrarAdjuntosDe } from './adjuntos.js';
 
 const router = Router();
 router.use(requiereAuth);
-
-const TIPOS = ['recibido', 'emitido'];
-const MODALIDADES = ['fisico', 'electronico'];
-const ESTADOS = ['pendiente', 'cobrado', 'depositado', 'rechazado'];
 
 // GET /api/cheques  (filtros: tipo, estado)
 router.get('/', async (req, res) => {
@@ -68,6 +66,7 @@ router.put('/:id', puedeEditar, async (req, res) => {
 router.delete('/:id', soloAdmin, async (req, res) => {
   const { rowCount } = await query('DELETE FROM cheques WHERE id = $1', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'No encontrado' });
+  await borrarAdjuntosDe('cheque', Number(req.params.id)); // no dejar fotos huérfanas
   await audit(req.user.id, 'eliminar', 'cheque', Number(req.params.id), null);
   res.json({ ok: true });
 });
@@ -84,6 +83,7 @@ router.patch('/:id/confirmar', puedeEditar, async (req, res) => {
 router.delete('/:id/borrador', puedeEditar, async (req, res) => {
   const { rowCount } = await query('DELETE FROM cheques WHERE id = $1 AND revisado = FALSE', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'No es un borrador pendiente' });
+  await borrarAdjuntosDe('cheque', Number(req.params.id));
   await audit(req.user.id, 'descartar', 'cheque', Number(req.params.id), null);
   res.json({ ok: true });
 });

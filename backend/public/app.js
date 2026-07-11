@@ -15,6 +15,8 @@ const puedeEditar = () => USER && (USER.rol === 'admin' || USER.rol === 'gestor'
 const esAdmin = () => USER && USER.rol === 'admin';
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 });
 const fecha = (d) => (d ? String(d).slice(0, 10) : '');
+// Para MOSTRAR en pantalla: DD/MM/AAAA (los <input type="date"> siguen usando fecha()).
+const fechaAR = (d) => { const s = fecha(d); const p = s.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s; };
 
 const LBL = {
   disciplina: { laser: 'Láser', serigrafia: 'Serigrafía', ploteo: 'Ploteo/Cartelería', impresion: 'Impresión' },
@@ -54,6 +56,43 @@ async function api(method, path, body) {
   if (!res.ok) throw new Error(data.error || 'Error');
   return data;
 }
+
+// ---------- Toasts (avisos no bloqueantes, reemplazan a alert) ----------
+function toast(msg, tipo = 'ok') {
+  let cont = document.getElementById('toasts');
+  if (!cont) { cont = document.createElement('div'); cont.id = 'toasts'; document.body.appendChild(cont); }
+  const t = document.createElement('div');
+  t.className = 'toast' + (tipo === 'error' ? ' toast-error' : '');
+  t.textContent = msg;
+  cont.appendChild(t);
+  setTimeout(() => { t.classList.add('irse'); setTimeout(() => t.remove(), 350); }, 3500);
+}
+// Cualquier error async sin manejar (fallos de API en los handlers) termina en un toast.
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = (e.reason && e.reason.message) || 'Error inesperado';
+  if (msg !== 'Sesión vencida') toast(msg, 'error');
+  e.preventDefault();
+});
+
+// ---------- Móvil: copiar los encabezados a cada celda (data-label) ----------
+// styles.css usa esas etiquetas para mostrar cada fila como tarjeta en pantallas chicas.
+function etiquetarTabla(tabla) {
+  const ths = [...tabla.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+  if (!ths.length) return;
+  tabla.querySelectorAll('tbody tr').forEach((tr) => {
+    [...tr.children].forEach((td, i) => { if (ths[i]) td.dataset.label = ths[i]; });
+  });
+}
+new MutationObserver((muts) => {
+  muts.forEach((m) => m.addedNodes.forEach((n) => {
+    if (n.nodeType !== 1) return;
+    if (n.tagName === 'TABLE') etiquetarTabla(n);
+    else if (n.querySelectorAll) n.querySelectorAll('table').forEach(etiquetarTabla);
+  }));
+}).observe(document.body, { childList: true, subtree: true });
+
+// ---------- PWA: registrar el service worker (solo funciona con HTTPS o localhost) ----------
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // ---------- Login / logout ----------
 $('#form-login').addEventListener('submit', async (e) => {
@@ -144,12 +183,12 @@ async function vistaDashboard() {
 
     <h3>Cheques próximos a vencer (15 días)</h3>
     ${tablaSimple(d.cheques_proximos, ['fecha_cobro', 'tipo', 'relacionado', 'importe'],
-      (c) => `<tr><td>${fecha(c.fecha_cobro)}</td><td>${LBL.cheque_tipo[c.tipo]}</td><td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td></tr>`,
+      (c) => `<tr><td>${fechaAR(c.fecha_cobro)}</td><td>${LBL.cheque_tipo[c.tipo]}</td><td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td></tr>`,
       ['Fecha', 'Tipo', 'Relacionado', 'Importe'])}
 
     <h3>Pagos de servicios pendientes</h3>
     ${tablaSimple(d.pagos_pendientes, ['concepto'],
-      (p) => `<tr><td>${esc(p.concepto)}</td><td>${fecha(p.fecha_vencimiento)}</td><td>${money(p.importe)}</td></tr>`,
+      (p) => `<tr><td>${esc(p.concepto)}</td><td>${fechaAR(p.fecha_vencimiento)}</td><td>${money(p.importe)}</td></tr>`,
       ['Concepto', 'Vence', 'Importe'])}
   `;
 }
@@ -204,7 +243,7 @@ async function cargarTrabajos() {
       <td><span class="clic" data-cobro="${t.id}" title="Marcar cobro">${t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')}</span></td>
       <td><span class="clic" data-fact="${t.id}" title="Marcar facturación">${t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')}</span></td>
       <td>${money(t.precio)}</td>
-      <td>${fecha(t.fecha_ingreso)}</td>
+      <td>${fechaAR(t.fecha_ingreso)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${t.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${t.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}
     </tbody></table>` : '<p>No hay trabajos con esos filtros.</p>';
@@ -214,7 +253,7 @@ async function cargarTrabajos() {
     if (confirm('¿Eliminar este trabajo?')) { await api('DELETE', '/trabajos/' + b.dataset.del); cargarTrabajos(); }
   });
 
-  const rapido = async (id, campos) => { try { await api('PATCH', '/trabajos/' + id + '/rapido', campos); cargarTrabajos(); } catch (e) { alert(e.message); } };
+  const rapido = async (id, campos) => { try { await api('PATCH', '/trabajos/' + id + '/rapido', campos); cargarTrabajos(); } catch (e) { toast(e.message, 'error'); } };
   $('#lista-trabajos').querySelectorAll('[data-adv]').forEach((b) => b.onclick = () => {
     const t = filas.find((x) => x.id == b.dataset.adv);
     const sig = AVANCE[t.estado] || t.estado;
@@ -288,7 +327,7 @@ async function cargarCheques() {
     <table><thead><tr><th>Tipo</th><th>Nº</th><th>Banco</th><th>Relacionado</th><th>Importe</th><th>Cobro/Venc.</th><th>Estado</th><th></th></tr></thead><tbody>
     ${filas.map((c) => `<tr>
       <td>${LBL.cheque_tipo[c.tipo]}${c.modalidad === 'electronico' ? ' <span class="badge badge-neutro">E-check</span>' : ''}${c.origen === 'ia' && !c.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(c.numero)}</td><td>${esc(c.banco)}</td>
-      <td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td><td>${fecha(c.fecha_cobro)}</td>
+      <td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td><td>${fechaAR(c.fecha_cobro)}</td>
       <td>${badgeCheque(c.estado)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${c.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${c.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}</tbody></table>` : '<p>Sin cheques.</p>';
@@ -378,7 +417,7 @@ async function cargarPagos() {
   $('#lista-pagos').innerHTML = filas.length ? `
     <table><thead><tr><th>Concepto</th><th>Período</th><th>Vence</th><th>Importe</th><th>Estado</th><th></th></tr></thead><tbody>
     ${filas.map((p) => `<tr>
-      <td>${esc(p.concepto)}${p.origen === 'ia' && !p.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(p.periodo)}</td><td>${fecha(p.fecha_vencimiento)}</td>
+      <td>${esc(p.concepto)}${p.origen === 'ia' && !p.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(p.periodo)}</td><td>${fechaAR(p.fecha_vencimiento)}</td>
       <td>${money(p.importe)}</td><td>${badgePago(p.estado)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${p.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${p.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}</tbody></table>` : '<p>Sin pagos cargados.</p>';
@@ -524,12 +563,12 @@ async function cargarBandeja() {
   }
   if (d.cheques.length) {
     html += '<h3>Cheques</h3><table><thead><tr><th>Tipo</th><th>Relacionado</th><th>Importe</th><th>Cobro/Venc.</th><th>Origen</th><th></th></tr></thead><tbody>' +
-      d.cheques.map((c) => `<tr><td>${LBL.cheque_tipo[c.tipo]}</td><td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td><td>${fecha(c.fecha_cobro)}</td><td>${esc(c.origen_ref) || 'IA'}</td><td class="acciones">${accionesBandeja('cheques', c.id)}</td></tr>`).join('') +
+      d.cheques.map((c) => `<tr><td>${LBL.cheque_tipo[c.tipo]}</td><td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td><td>${fechaAR(c.fecha_cobro)}</td><td>${esc(c.origen_ref) || 'IA'}</td><td class="acciones">${accionesBandeja('cheques', c.id)}</td></tr>`).join('') +
       '</tbody></table>';
   }
   if (d.pagos.length) {
     html += '<h3>Pagos de servicios</h3><table><thead><tr><th>Concepto</th><th>Importe</th><th>Vence</th><th>Origen</th><th></th></tr></thead><tbody>' +
-      d.pagos.map((p) => `<tr><td>${esc(p.concepto)}</td><td>${money(p.importe)}</td><td>${fecha(p.fecha_vencimiento)}</td><td>${esc(p.origen_ref) || 'IA'}</td><td class="acciones">${accionesBandeja('pagos', p.id)}</td></tr>`).join('') +
+      d.pagos.map((p) => `<tr><td>${esc(p.concepto)}</td><td>${money(p.importe)}</td><td>${fechaAR(p.fecha_vencimiento)}</td><td>${esc(p.origen_ref) || 'IA'}</td><td class="acciones">${accionesBandeja('pagos', p.id)}</td></tr>`).join('') +
       '</tbody></table>';
   }
   cont.innerHTML = html;
@@ -559,7 +598,11 @@ async function refrescarBadgeBandeja(total) {
   } catch { return; }
   const btn = document.querySelector('#menu button[data-vista="bandeja"]');
   if (btn) btn.textContent = 'Bandeja' + (total ? ` (${total})` : '');
+  // El título de la pestaña también avisa cuántos pendientes hay.
+  document.title = (total ? `(${total}) ` : '') + 'GraficArte — Gestión de Taller';
 }
+// Refresco automático: si entra algo por WhatsApp mientras la pestaña está abierta, se nota.
+setInterval(() => { if (TOKEN && USER) refrescarBadgeBandeja(); }, 60000);
 
 // ---------- Helpers de UI ----------
 // ---------- Clientes (empresas y contactos) ----------
@@ -662,11 +705,11 @@ async function verTrabajosCliente(tipo, id, nombre) {
   abrirModalInfo('Trabajos de ' + nombre, `
     <div class="tarjetas" style="margin-bottom:14px">
       <div class="tarjeta"><div>Trabajos</div><div class="num">${filas.length}</div></div>
-      <div class="tarjeta"><div>Facturado total</div><div class="num">${money(total)}</div></div>
+      <div class="tarjeta"><div>Total trabajos</div><div class="num">${money(total)}</div></div>
       <div class="tarjeta"><div>Por cobrar</div><div class="num">${money(porCobrar)}</div></div>
     </div>
     ${filas.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Fecha</th><th>Descripción</th><th>Disciplina</th><th>Estado</th><th>Precio</th></tr></thead><tbody>
-      ${filas.map((t) => `<tr><td>${fecha(t.fecha_ingreso)}</td><td>${esc(t.descripcion)}</td><td>${LBL.disciplina[t.disciplina] || t.disciplina}</td><td>${badgeEstado(t.estado)}</td><td>${money(t.precio)}</td></tr>`).join('')}
+      ${filas.map((t) => `<tr><td>${fechaAR(t.fecha_ingreso)}</td><td>${esc(t.descripcion)}</td><td>${LBL.disciplina[t.disciplina] || t.disciplina}</td><td>${badgeEstado(t.estado)}</td><td>${money(t.precio)}</td></tr>`).join('')}
     </tbody></table></div>` : '<p>Sin trabajos registrados para este cliente.</p>'}`);
 }
 
@@ -698,7 +741,7 @@ function abrirModal(titulo, htmlCampos, onSubmit) {
   fondo.querySelector('#modal-cancelar').onclick = cerrarModal;
   fondo.querySelector('form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { await onSubmit(e.target); }
+    try { await onSubmit(e.target); toast('Guardado ✓'); }
     catch (err) { fondo.querySelector('#modal-error').textContent = err.message; }
   });
 }

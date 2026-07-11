@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { query, audit } from '../db.js';
 import { requiereIngest } from '../auth.js';
 import { resolverEmpresa, resolverContacto } from '../resolvers.js';
+import { DISCIPLINAS, ESTADOS } from '../constantes.js';
 
 const router = Router();
 router.use(requiereIngest);
@@ -15,8 +16,9 @@ const WAHA_API_KEY = process.env.WAHA_API_KEY || '';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:14b';
-const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo', 'impresion'];
-const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera', 'finalizado'];
+// keep_alive: el modelo queda cargado en la GPU entre mensajes. Sin esto, Ollama lo
+// descarga a los ~5 min y cada mensaje nuevo paga la recarga completa a VRAM.
+const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '24h';
 const LBL_ESTADO = { cotizar: 'por cotizar', presupuestado: 'presupuestado', pedido: 'pedido', en_progreso: 'en progreso', en_espera: 'en espera', finalizado: 'finalizado' };
 const AUTORIZADOS = (process.env.AUTORIZADOS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
@@ -100,7 +102,7 @@ async function ollamaJSON(prompt, schema) {
   try {
     const r = await fetch(OLLAMA_URL + '/api/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, think: false, format: schema || 'json', options: { temperature: 0 } }),
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, think: false, keep_alive: OLLAMA_KEEP_ALIVE, format: schema || 'json', options: { temperature: 0 } }),
     });
     const j = await r.json();
     if (!j || typeof j.response !== 'string' || !j.response.trim()) {

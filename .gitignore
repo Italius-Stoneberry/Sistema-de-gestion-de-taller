@@ -3,6 +3,9 @@
 *.env
 !.env.example
 
+# Backups de la base (no van al repo)
+backups/
+
 # Dependencias / build
 node_modules/
 *.log

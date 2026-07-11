@@ -18,11 +18,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 
   app:
     build: ./backend
     container_name: taller-app
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       db:
         condition: service_healthy
@@ -38,6 +43,8 @@ services:
       INGEST_API_KEY: ${INGEST_API_KEY}
       OLLAMA_URL: http://host.docker.internal:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+      # Cuánto tiempo queda el modelo cargado en la GPU entre mensajes (latencia mucho menor).
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
       AUTORIZADOS: ${AUTORIZADOS:-}
       # Para bajar imágenes que llegan por WhatsApp (fotos de cheques, referencias, etc.)
       WAHA_URL: ${WAHA_URL:-http://host.docker.internal:3001}
@@ -56,6 +63,40 @@ services:
       - ./backend/public:/app/public
       # Imágenes adjuntas (persisten entre rebuilds)
       - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Backup diario de la base a ./backups (14 días de retención).
+  # Copiá esa carpeta a otro disco o a la nube de vez en cuando.
+  backup:
+    image: prodrigestivill/postgres-backup-local:16
+    container_name: taller-backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backups:/backups
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 14
+      BACKUP_KEEP_WEEKS: 8
+      BACKUP_KEEP_MONTHS: 6
+      HEALTHCHECK_PORT: 8080
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 
 volumes:
   db_data:

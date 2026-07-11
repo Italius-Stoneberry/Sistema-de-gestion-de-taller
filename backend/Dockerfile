@@ -3,5 +3,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 COPY . .
+# Correr como usuario sin privilegios (node), no como root.
+RUN mkdir -p /app/uploads && chown -R node:node /app
+USER node
 EXPOSE 3000
 CMD ["node", "src/index.js"]

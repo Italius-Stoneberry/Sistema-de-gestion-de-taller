@@ -6,6 +6,29 @@ import { requiereAuth, puedeEditar } from '../auth.js';
 
 const router = Router();
 const UPLOADS_DIR = process.env.UPLOADS_DIR || '/app/uploads';
+const RAIZ = path.resolve(UPLOADS_DIR);
+
+// La ruta resuelta tiene que quedar ESTRICTAMENTE adentro del volumen de uploads
+// (con separador incluido, para que /app/uploads-otro no pase el filtro).
+function rutaSegura(archivo) {
+  const abs = path.resolve(RAIZ, archivo);
+  return abs.startsWith(RAIZ + path.sep) ? abs : null;
+}
+
+// Borra archivos y filas de adjuntos de una entidad. Lo usan los DELETE de trabajos y cheques
+// para no dejar huérfanos en el volumen.
+export async function borrarAdjuntosDe(entidad, entidadId) {
+  const { rows } = await query(
+    'DELETE FROM adjuntos WHERE entidad = $1 AND entidad_id = $2 RETURNING archivo',
+    [entidad, entidadId]
+  );
+  for (const r of rows) {
+    const abs = rutaSegura(r.archivo);
+    if (abs) await fs.promises.unlink(abs).catch(() => {});
+  }
+  return rows.length;
+}
+
 router.use(requiereAuth);
 
 // GET /api/adjuntos?entidad=trabajo&entidad_id=5  -> lista de adjuntos de esa entidad
@@ -23,8 +46,8 @@ router.get('/', async (req, res) => {
 router.get('/:id/archivo', async (req, res) => {
   const { rows } = await query('SELECT archivo, mime FROM adjuntos WHERE id=$1', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
-  const abs = path.resolve(UPLOADS_DIR, rows[0].archivo);
-  if (!abs.startsWith(path.resolve(UPLOADS_DIR)) || !fs.existsSync(abs)) return res.status(404).json({ error: 'Archivo no disponible' });
+  const abs = rutaSegura(rows[0].archivo);
+  if (!abs || !fs.existsSync(abs)) return res.status(404).json({ error: 'Archivo no disponible' });
   if (rows[0].mime) res.type(rows[0].mime);
   fs.createReadStream(abs).pipe(res);
 });
@@ -33,8 +56,8 @@ router.get('/:id/archivo', async (req, res) => {
 router.delete('/:id', puedeEditar, async (req, res) => {
   const { rows } = await query('DELETE FROM adjuntos WHERE id=$1 RETURNING archivo', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
-  const abs = path.resolve(UPLOADS_DIR, rows[0].archivo);
-  if (abs.startsWith(path.resolve(UPLOADS_DIR))) fs.promises.unlink(abs).catch(() => {});
+  const abs = rutaSegura(rows[0].archivo);
+  if (abs) await fs.promises.unlink(abs).catch(() => {});
   await audit(req.user.id, 'eliminar', 'adjunto', Number(req.params.id), null);
   res.json({ ok: true });
 });

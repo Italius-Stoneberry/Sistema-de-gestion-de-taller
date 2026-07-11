@@ -2,12 +2,11 @@ import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereAuth, puedeEditar, soloAdmin } from '../auth.js';
 import { resolverEmpresa, resolverContacto } from '../resolvers.js';
+import { DISCIPLINAS, ESTADOS } from '../constantes.js';
+import { borrarAdjuntosDe } from './adjuntos.js';
 
 const router = Router();
 router.use(requiereAuth);
-
-const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo', 'impresion'];
-const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera', 'finalizado'];
 
 // Resuelve empresa y contacto a partir de ids o nombres (los crea si no existen).
 async function resolverCliente(b, origen = 'manual') {
@@ -143,6 +142,7 @@ router.patch('/:id/estado', puedeEditar, async (req, res) => {
 router.delete('/:id', soloAdmin, async (req, res) => {
   const { rowCount } = await query('DELETE FROM trabajos WHERE id = $1', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'No encontrado' });
+  await borrarAdjuntosDe('trabajo', Number(req.params.id)); // no dejar fotos huérfanas
   await audit(req.user.id, 'eliminar', 'trabajo', Number(req.params.id), null);
   res.json({ ok: true });
 });
@@ -162,6 +162,7 @@ router.patch('/:id/confirmar', puedeEditar, async (req, res) => {
 router.delete('/:id/borrador', puedeEditar, async (req, res) => {
   const { rowCount } = await query('DELETE FROM trabajos WHERE id = $1 AND revisado = FALSE', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'No es un borrador pendiente' });
+  await borrarAdjuntosDe('trabajo', Number(req.params.id));
   await audit(req.user.id, 'descartar', 'trabajo', Number(req.params.id), null);
   res.json({ ok: true });
 });
