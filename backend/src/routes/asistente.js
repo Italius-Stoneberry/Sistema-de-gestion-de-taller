@@ -381,7 +381,7 @@ async function nudgeTexto() {
 async function bajarImagenWaha(mediaUrl) {
   // La URL que da WAHA apunta a su propio host (localhost:3000). Reescribimos SOLO el scheme+host
   // para alcanzar WAHA desde el contenedor, con un reemplazo de texto (no rompe si WAHA_URL es rara).
-  let base = (WAHA_URL || '').trim();
+  let base = (WAHA_URL || '').trim().split(/\s/)[0];   // corta basura tras un espacio (env mal cargada)
   if (base && !/^https?:\/\//i.test(base)) base = 'http://' + base;
   // localhost/127.0.0.1 adentro del contenedor NO es WAHA (es la app): forzar host-gateway.
   if (!base || /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(base)) base = 'http://host.docker.internal:3001';
@@ -537,6 +537,26 @@ router.post('/mensaje', async (req, res) => {
       else { const d = await bajarImagenWaha(mediaUrl); buf = d.buf; mime = mime0 || d.mime; }
     } catch (e) { console.error('img:', e.message); return res.json({ reply: '📎 Recibí una imagen pero no la pude descargar. Probá de nuevo en un ratito.' }); }
     const archivo = await guardarArchivo(buf, mime);
+
+    // Si el texto describe un ítem NUEVO (cheque o trabajo), lo creamos y le adjuntamos la foto.
+    if (texto) {
+      const ctxNegocio = await contextoClientes();
+      const clasif = await ollamaJSON(promptClasificar(texto, ctxNegocio), SCHEMA.clasificar);
+      if (clasif.intencion === 'nuevo_cheque') {
+        const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
+        const ch = await crearCheque(c);
+        await adjuntar('cheque', ch.id, archivo, mime, texto);
+        await setCtx(from, 'idle', { pendiente: { tipo: 'cheque', id: ch.id } });
+        return res.json({ reply: `🧾📎 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)} con la foto adjunta.\nRespondé "ok" para confirmarlo o "no" para descartarlo.` });
+      }
+      if (clasif.intencion === 'nuevo_trabajo') {
+        const tr = await crearBorradorDesde(clasif);
+        await adjuntar('trabajo', tr.id, archivo, mime, texto);
+        await setCtx(from, 'idle', { pendiente: { tipo: 'trabajo', id: tr.id } });
+        return res.json({ reply: `🆕📎 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} con la foto adjunta.\nRespondé "ok" para confirmar o "no" para descartar.` });
+      }
+    }
+
     let objetivo = await resolverObjetivo(texto, ctx);
     // Si no lo aclara en el texto, la pego al último borrador recién anotado (trabajo o cheque).
     if (!objetivo.id && ctx.datos && ctx.datos.pendiente && ctx.datos.pendiente.id && ctx.datos.pendiente.tipo !== 'pago') {
