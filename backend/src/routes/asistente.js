@@ -507,12 +507,15 @@ router.post('/mensaje', async (req, res) => {
   const t = texto.toLowerCase();
   const ctx = await getCtx(from);
   const esOpcion = (n) => t === String(n) || t === n + ')' || t === n + '.';
-  const mediaUrl = (req.body && req.body.media_url) || null;
-  const mediaB64 = (req.body && req.body.media_base64) || null;
-  const mime0 = (req.body && req.body.mimetype) || null;
+  // Limpia valores basura que manda n8n en modo JSON ("null", "undefined", vacío).
+  const limpio = (v) => { const s = (v == null ? '' : String(v)).trim(); return (!s || s === 'null' || s === 'undefined') ? null : s; };
+  const mediaUrl = limpio(req.body && req.body.media_url);
+  const mediaB64 = limpio(req.body && req.body.media_base64);
+  const mime0 = limpio(req.body && req.body.mimetype);
+  const tieneImagen = !!mediaB64 || (!!mediaUrl && /^https?:\/\//i.test(mediaUrl));
 
   // ---- Llegó una IMAGEN por WhatsApp ----
-  if (mediaUrl || mediaB64) {
+  if (tieneImagen) {
     let buf; let mime;
     try {
       if (mediaB64) { buf = Buffer.from(mediaB64, 'base64'); mime = mime0 || 'image/jpeg'; }
