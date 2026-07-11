@@ -400,6 +400,7 @@ async function bajarImagenWaha(mediaUrl) {
     if (r.status !== 404) break;                         // otro error: no tiene sentido reintentar
     await new Promise((res) => setTimeout(res, 800));    // el archivo puede no estar listo todavía
   }
+  console.error('img url fallida:', JSON.stringify(mediaUrl), '=>', url, 'status', ultimo);
   throw new Error('WAHA media ' + ultimo);
 }
 const extDeMime = (m) => (m && m.includes('png')) ? 'png' : (m && m.includes('webp')) ? 'webp' : (m && m.includes('pdf')) ? 'pdf' : 'jpg';
