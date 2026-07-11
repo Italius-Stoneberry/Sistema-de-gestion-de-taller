@@ -87,6 +87,7 @@ const VISTAS = [
   { id: 'trabajos', nombre: 'Trabajos', render: vistaTrabajos },
   { id: 'cheques', nombre: 'Cheques', render: vistaCheques },
   { id: 'pagos', nombre: 'Pagos de servicios', render: vistaPagos },
+  { id: 'compras', nombre: 'Compras', render: vistaCompras },
   { id: 'clientes', nombre: 'Clientes', render: vistaClientes },
   { id: 'bandeja', nombre: 'Bandeja', render: vistaBandeja },
   { id: 'usuarios', nombre: 'Usuarios', render: vistaUsuarios, soloAdmin: true },
@@ -357,6 +358,51 @@ function formPago(p, onDone) {
       periodo: f.periodo.value, fecha_vencimiento: f.fecha_vencimiento.value || null, notas: f.notas.value };
     if (p.id) await api('PUT', '/pagos/' + p.id, body); else await api('POST', '/pagos', body);
     cerrarModal(); (onDone || cargarPagos)();
+  });
+}
+
+// ---------- COMPRAS (lista de insumos) ----------
+function vistaCompras() {
+  $('#contenido').innerHTML = `
+    <h2>Lista de compras</h2>
+    <div class="filtros">
+      <label>Ver <select id="cf-comprado"><option value="false">Pendientes</option><option value="true">Compradas</option><option value="">Todas</option></select></label>
+      ${puedeEditar() ? '<button id="btn-nueva-compra" class="btn-primary">+ Agregar</button>' : ''}
+    </div>
+    <div id="lista-compras"></div>`;
+  $('#cf-comprado').addEventListener('change', cargarCompras);
+  if (puedeEditar()) $('#btn-nueva-compra').addEventListener('click', () => formCompra());
+  cargarCompras();
+}
+
+async function cargarCompras() {
+  const qs = new URLSearchParams();
+  const f = $('#cf-comprado').value;
+  if (f) qs.set('comprado', f);
+  const filas = await api('GET', '/compras?' + qs.toString());
+  $('#lista-compras').innerHTML = filas.length ? `
+    <table><thead><tr><th></th><th>Ítem</th><th>Cantidad</th><th></th></tr></thead><tbody>
+    ${filas.map((c) => `<tr>
+      <td>${puedeEditar() ? `<input type="checkbox" data-check="${c.id}" ${c.comprado ? 'checked' : ''} />` : (c.comprado ? '✅' : '⬜')}</td>
+      <td>${c.comprado ? '<s>' + esc(c.item) + '</s>' : esc(c.item)}${c.origen === 'ia' ? ' <em>(IA)</em>' : ''}</td>
+      <td>${esc(c.cantidad)}</td>
+      <td class="acciones">${puedeEditar() ? `<button data-edit="${c.id}">Editar</button><button data-del="${c.id}" class="btn-danger">Borrar</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>` : '<p>La lista está vacía.</p>';
+  $('#lista-compras').querySelectorAll('[data-check]').forEach((b) => b.onclick = async () => { await api('PATCH', '/compras/' + b.dataset.check + '/comprado', { comprado: b.checked }); cargarCompras(); });
+  $('#lista-compras').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formCompra(filas.find((c) => c.id == b.dataset.edit)));
+  $('#lista-compras').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('¿Borrar de la lista?')) { await api('DELETE', '/compras/' + b.dataset.del); cargarCompras(); } });
+}
+
+function formCompra(c, onDone) {
+  c = c || {};
+  abrirModal(`${c.id ? 'Editar' : 'Agregar'} ítem`, `
+    <div class="grid">
+      <label class="full">Ítem <input name="item" value="${esc(c.item)}" required /></label>
+      <label class="full">Cantidad <input name="cantidad" placeholder="2 rollos, medio kilo…" value="${esc(c.cantidad)}" /></label>
+    </div>`, async (f) => {
+    const body = { item: f.item.value, cantidad: f.cantidad.value || null };
+    if (c.id) await api('PUT', '/compras/' + c.id, body); else await api('POST', '/compras', body);
+    cerrarModal(); (onDone || cargarCompras)();
   });
 }
 
