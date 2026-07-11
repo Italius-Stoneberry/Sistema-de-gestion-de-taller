@@ -387,11 +387,20 @@ async function bajarImagenWaha(mediaUrl) {
     u.protocol = base.protocol; u.host = base.host;
     url = u.toString();
   } catch { /* si no es URL válida, se usa tal cual */ }
-  const r = await fetch(url, { headers: WAHA_API_KEY ? { 'X-Api-Key': WAHA_API_KEY } : {} });
-  if (!r.ok) throw new Error('WAHA media ' + r.status);
-  const mime = r.headers.get('content-type') || 'image/jpeg';
-  const buf = Buffer.from(await r.arrayBuffer());
-  return { buf, mime };
+  // Reintenta: WAHA puede tardar ~1s en terminar de guardar el archivo tras avisar por webhook.
+  let ultimo = 0;
+  for (let intento = 0; intento < 6; intento++) {
+    const r = await fetch(url, { headers: WAHA_API_KEY ? { 'X-Api-Key': WAHA_API_KEY } : {} });
+    if (r.ok) {
+      const mime = r.headers.get('content-type') || 'image/jpeg';
+      const buf = Buffer.from(await r.arrayBuffer());
+      return { buf, mime };
+    }
+    ultimo = r.status;
+    if (r.status !== 404) break;                         // otro error: no tiene sentido reintentar
+    await new Promise((res) => setTimeout(res, 800));    // el archivo puede no estar listo todavía
+  }
+  throw new Error('WAHA media ' + ultimo);
 }
 const extDeMime = (m) => (m && m.includes('png')) ? 'png' : (m && m.includes('webp')) ? 'webp' : (m && m.includes('pdf')) ? 'pdf' : 'jpg';
 async function guardarArchivo(buf, mime) {
