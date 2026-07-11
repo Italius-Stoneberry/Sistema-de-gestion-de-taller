@@ -147,6 +147,20 @@ CREATE TABLE IF NOT EXISTS conversaciones (
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ========== ADJUNTOS / IMÁGENES (v1.7) ==========
+CREATE TABLE IF NOT EXISTS adjuntos (
+  id          SERIAL PRIMARY KEY,
+  entidad     TEXT NOT NULL CHECK (entidad IN ('trabajo','cheque')),
+  entidad_id  INTEGER NOT NULL,
+  archivo     TEXT NOT NULL,
+  mime        TEXT,
+  descripcion TEXT,
+  origen      TEXT NOT NULL DEFAULT 'manual',
+  creado_por  INTEGER REFERENCES usuarios(id),
+  creado_en   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_adjuntos_entidad ON adjuntos(entidad, entidad_id);
+
 -- ========== LISTA DE COMPRAS (v1.5) ==========
 CREATE TABLE IF NOT EXISTS lista_compras (
   id         SERIAL PRIMARY KEY,

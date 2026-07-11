@@ -181,6 +181,16 @@ tr:hover td { background: var(--ga-superficie); }
   .login-card { padding: var(--ga-sp-2); }
 }
 
+/* ---------- Galería de adjuntos (imágenes) ---------- */
+.galeria-tit { font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); margin-bottom: 6px; }
+.galeria { display: flex; flex-wrap: wrap; gap: 10px; }
+.galeria-vacia { color: var(--ga-texto-2); font-size: .85rem; }
+.foto { position: relative; width: 92px; }
+.foto img { width: 92px; height: 92px; object-fit: cover; border-radius: var(--ga-radio-sm); border: 1px solid var(--ga-linea); cursor: pointer; background: var(--ga-panel-2); }
+.foto-cap { font-size: 11px; color: var(--ga-texto-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foto-del { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 50%; background: rgba(18,18,18,.75); color: #fff; border: none; cursor: pointer; }
+.foto-del:hover { background: var(--ga-rojo); }
+
 /* ---------- Acciones de un toque (fluidez) ---------- */
 .clic { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--ga-radio-sm); }
 .clic:hover { filter: brightness(0.96); }

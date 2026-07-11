@@ -245,6 +245,7 @@ function formTrabajo(t, onDone) {
       <label>Entrega estimada <input name="fecha_entrega_estimada" type="date" value="${fecha(t.fecha_entrega_estimada)}" /></label>
       <label>Responsable <input name="responsable" value="${esc(t.responsable)}" /></label>
       <label class="full">Notas <textarea name="notas">${esc(t.notas)}</textarea></label>
+      ${galeriaCampo('trabajo', t.id)}
     </div>
   `, async (f) => {
     const body = {
@@ -260,6 +261,7 @@ function formTrabajo(t, onDone) {
     cerrarModal(); (onDone || cargarTrabajos)();
   });
   poblarDatalistsCliente();
+  if (t.id) cargarGaleria('trabajo', t.id);
 }
 
 // ---------- Cheques ----------
@@ -307,6 +309,7 @@ function formCheque(c, onDone) {
       <label>Cliente/Proveedor <input name="relacionado" value="${esc(c.relacionado)}" /></label>
       <label>Fecha emisión <input name="fecha_emision" type="date" value="${fecha(c.fecha_emision)}" /></label>
       <label>Fecha cobro/venc. <input name="fecha_cobro" type="date" value="${fecha(c.fecha_cobro)}" /></label>
+      ${galeriaCampo('cheque', c.id)}
     </div>`, async (f) => {
     const body = { tipo: f.tipo.value, modalidad: f.modalidad.value, estado: f.estado.value, numero: f.numero.value, banco: f.banco.value,
       importe: Number(f.importe.value || 0), relacionado: f.relacionado.value,
@@ -314,6 +317,44 @@ function formCheque(c, onDone) {
     if (c.id) await api('PUT', '/cheques/' + c.id, body); else await api('POST', '/cheques', body);
     cerrarModal(); (onDone || cargarCheques)();
   });
+  if (c.id) cargarGaleria('cheque', c.id);
+}
+
+// ---------- GALERÍA DE ADJUNTOS (imágenes) ----------
+function galeriaCampo(entidad, id) {
+  if (!id) return '';
+  return `<div class="full">
+    <div class="galeria-tit">Fotos</div>
+    <div id="galeria" class="galeria">Cargando…</div>
+  </div>`;
+}
+async function cargarGaleria(entidad, id) {
+  const cont = $('#galeria');
+  if (!cont) return;
+  let filas = [];
+  try { filas = await api('GET', `/adjuntos?entidad=${entidad}&entidad_id=${id}`); } catch { cont.textContent = 'No se pudieron cargar las fotos.'; return; }
+  if (!filas.length) { cont.innerHTML = '<span class="galeria-vacia">Sin fotos.</span>'; return; }
+  cont.innerHTML = '';
+  for (const a of filas) {
+    const wrap = document.createElement('div');
+    wrap.className = 'foto';
+    const img = document.createElement('img');
+    img.alt = a.descripcion || 'foto';
+    img.loading = 'lazy';
+    try {
+      const res = await fetch('/api/adjuntos/' + a.id + '/archivo', { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
+      if (res.ok) { const url = URL.createObjectURL(await res.blob()); img.src = url; img.onclick = () => window.open(url, '_blank'); }
+    } catch { /* ignora */ }
+    wrap.appendChild(img);
+    if (a.descripcion) { const cap = document.createElement('div'); cap.className = 'foto-cap'; cap.textContent = a.descripcion; wrap.appendChild(cap); }
+    if (puedeEditar()) {
+      const del = document.createElement('button');
+      del.type = 'button'; del.textContent = '✕'; del.className = 'foto-del'; del.title = 'Borrar';
+      del.onclick = async () => { if (confirm('¿Borrar esta foto?')) { await api('DELETE', '/adjuntos/' + a.id); cargarGaleria(entidad, id); } };
+      wrap.appendChild(del);
+    }
+    cont.appendChild(wrap);
+  }
 }
 
 // ---------- Pagos de servicios ----------

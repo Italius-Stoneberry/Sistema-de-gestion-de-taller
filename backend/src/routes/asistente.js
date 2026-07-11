@@ -1,10 +1,17 @@
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 import { query, audit } from '../db.js';
 import { requiereIngest } from '../auth.js';
 import { resolverEmpresa, resolverContacto } from '../resolvers.js';
 
 const router = Router();
 router.use(requiereIngest);
+
+const UPLOADS_DIR = process.env.UPLOADS_DIR || '/app/uploads';
+const WAHA_URL = process.env.WAHA_URL || 'http://host.docker.internal:3001';
+const WAHA_API_KEY = process.env.WAHA_API_KEY || '';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:14b';
@@ -150,6 +157,8 @@ function ayudaTexto() {
     + `🛒 *COMPRAS*\n`
     + `• Anotar: "falta tinta negra"\n`
     + `• Ver / tachar: "ver compras", "ya compré la tinta"\n\n`
+    + `📷 *FOTOS*\n`
+    + `• Mandame una foto (cheque, factura, la camioneta, un diseño) y decime a qué va en el texto de la foto: "para el 5", "cheque de garcía". Si no, te pregunto.\n\n`
     + `❓ *PREGUNTARME*\n`
     + `• "¿qué me deben?", "¿cuánto le facturé a andreu?", "¿cuánto vendí este mes?", "trabajos de ramiro"\n\n`
     + `Cuando anoto algo te pido confirmación: respondé *"ok"* para guardarlo o *"no"* para descartarlo.\n`
@@ -368,6 +377,56 @@ async function nudgeTexto() {
   return L.join('\n');
 }
 
+// ---- Imágenes / adjuntos que llegan por WhatsApp ----
+async function bajarImagenWaha(mediaUrl) {
+  // La URL que da WAHA apunta a su propio host; la reescribimos para alcanzarlo desde el contenedor.
+  let url = mediaUrl;
+  try {
+    const u = new URL(mediaUrl);
+    const base = new URL(WAHA_URL);
+    u.protocol = base.protocol; u.host = base.host;
+    url = u.toString();
+  } catch { /* si no es URL válida, se usa tal cual */ }
+  const r = await fetch(url, { headers: WAHA_API_KEY ? { 'X-Api-Key': WAHA_API_KEY } : {} });
+  if (!r.ok) throw new Error('WAHA media ' + r.status);
+  const mime = r.headers.get('content-type') || 'image/jpeg';
+  const buf = Buffer.from(await r.arrayBuffer());
+  return { buf, mime };
+}
+const extDeMime = (m) => (m && m.includes('png')) ? 'png' : (m && m.includes('webp')) ? 'webp' : (m && m.includes('pdf')) ? 'pdf' : 'jpg';
+async function guardarArchivo(buf, mime) {
+  const dir = path.join(UPLOADS_DIR, 'whatsapp');
+  await fs.promises.mkdir(dir, { recursive: true });
+  const nombre = crypto.randomUUID() + '.' + extDeMime(mime);
+  await fs.promises.writeFile(path.join(dir, nombre), buf);
+  return path.join('whatsapp', nombre); // ruta relativa al volumen de uploads
+}
+async function adjuntar(entidad, entidadId, archivo, mime, descripcion) {
+  const { rows } = await query(
+    `INSERT INTO adjuntos (entidad, entidad_id, archivo, mime, descripcion, origen) VALUES ($1,$2,$3,$4,$5,'ia') RETURNING *`,
+    [entidad, entidadId, archivo, mime, descripcion || null]);
+  await audit(null, 'ingesta', 'adjunto', rows[0].id, { entidad, entidadId });
+  return rows[0];
+}
+// Resuelve a qué trabajo o cheque va la foto, a partir del caption o de la respuesta del usuario.
+async function resolverObjetivo(texto, ctx) {
+  const txt = (texto || '').trim();
+  if (!txt) return {};
+  const esCheque = /cheque|e-?check/i.test(txt);
+  const idTxt = txt.match(/#?(\d{1,6})/);
+  const u = await ollamaJSON(promptActualizar(txt, ''), SCHEMA.actualizar);
+  const refId = u.ref_id || (idTxt ? Number(idTxt[1]) : null);
+  if (esCheque) {
+    if (refId) { const r = await query('SELECT relacionado FROM cheques WHERE id=$1', [refId]); if (r.rows[0]) return { tipo: 'cheque', id: refId, nombre: r.rows[0].relacionado }; }
+    if (u.ref_cliente) { const r = await query("SELECT id, relacionado FROM cheques WHERE relacionado ILIKE '%'||$1||'%' ORDER BY creado_en DESC LIMIT 1", [u.ref_cliente]); if (r.rows[0]) return { tipo: 'cheque', id: r.rows[0].id, nombre: r.rows[0].relacionado }; }
+    return {};
+  }
+  if (refId) { const r = await query('SELECT cliente FROM trabajos WHERE id=$1', [refId]); if (r.rows[0]) return { tipo: 'trabajo', id: refId, nombre: r.rows[0].cliente }; }
+  if (u.ref_n && ctx.datos && ctx.datos.lista) { const it = ctx.datos.lista.find((x) => x.n == u.ref_n); if (it) return { tipo: 'trabajo', id: it.id }; }
+  if (u.ref_cliente) { const r = await query("SELECT id, cliente FROM trabajos WHERE cliente ILIKE '%'||$1||'%' ORDER BY (estado<>'finalizado') DESC, actualizado_en DESC LIMIT 1", [u.ref_cliente]); if (r.rows[0]) return { tipo: 'trabajo', id: r.rows[0].id, nombre: r.rows[0].cliente }; }
+  return {};
+}
+
 const esSi = (t) => /^(s[ií]|dale|obvio|sip|yes|ya|listo)\b/i.test(t);
 const esNo = (t) => /^(no|nop|todav[ií]a|a[uú]n no|negativo)\b/i.test(t);
 const esSaludo = (t) => ['hola', 'menu', 'menú', 'inicio', 'buenas', 'empezar', 'buen dia'].includes(t);
@@ -448,6 +507,40 @@ router.post('/mensaje', async (req, res) => {
   const t = texto.toLowerCase();
   const ctx = await getCtx(from);
   const esOpcion = (n) => t === String(n) || t === n + ')' || t === n + '.';
+  const mediaUrl = (req.body && req.body.media_url) || null;
+  const mediaB64 = (req.body && req.body.media_base64) || null;
+  const mime0 = (req.body && req.body.mimetype) || null;
+
+  // ---- Llegó una IMAGEN por WhatsApp ----
+  if (mediaUrl || mediaB64) {
+    let buf; let mime;
+    try {
+      if (mediaB64) { buf = Buffer.from(mediaB64, 'base64'); mime = mime0 || 'image/jpeg'; }
+      else { const d = await bajarImagenWaha(mediaUrl); buf = d.buf; mime = mime0 || d.mime; }
+    } catch (e) { console.error('img:', e.message); return res.json({ reply: '📎 Recibí una imagen pero no la pude descargar. Probá de nuevo en un ratito.' }); }
+    const archivo = await guardarArchivo(buf, mime);
+    let objetivo = await resolverObjetivo(texto, ctx);
+    // Si no lo aclara en el texto, la pego al último borrador recién anotado (trabajo o cheque).
+    if (!objetivo.id && ctx.datos && ctx.datos.pendiente && ctx.datos.pendiente.id && ctx.datos.pendiente.tipo !== 'pago') {
+      objetivo = { tipo: ctx.datos.pendiente.tipo, id: ctx.datos.pendiente.id };
+    }
+    if (objetivo.id) {
+      await adjuntar(objetivo.tipo, objetivo.id, archivo, mime, texto || null);
+      return res.json({ reply: `📎 Guardé la foto en ${objetivo.tipo === 'cheque' ? 'el cheque' : 'el trabajo'} #${objetivo.id}${objetivo.nombre ? ` (${objetivo.nombre})` : ''}.` });
+    }
+    await setCtx(from, 'adjuntando', { archivo, mime });
+    return res.json({ reply: '📎 Recibí la foto. ¿A qué la adjunto? Decime el número (ej: #5) o el nombre del cliente. Si es un cheque, aclarámelo (ej: "cheque de garcía").' });
+  }
+
+  // ---- Respuesta a "¿a qué adjunto la foto?" ----
+  if (ctx.estado === 'adjuntando') {
+    if (/^cancel/i.test(t) || esSalir(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: 'Listo, descarté la foto.' }); }
+    const objetivo = await resolverObjetivo(texto, ctx);
+    if (!objetivo.id) return res.json({ reply: 'No ubiqué a cuál. Decime el número (#5) o el nombre del cliente. (o "cancelar")' });
+    await adjuntar(objetivo.tipo, objetivo.id, ctx.datos.archivo, ctx.datos.mime, null);
+    await setCtx(from, 'idle', {});
+    return res.json({ reply: `📎 Listo, foto guardada en ${objetivo.tipo === 'cheque' ? 'el cheque' : 'el trabajo'} #${objetivo.id}.` });
+  }
 
   if (esSalir(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: '👍 Cuando quieras.' }); }
   if (esAyuda(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: ayudaTexto() }); }
