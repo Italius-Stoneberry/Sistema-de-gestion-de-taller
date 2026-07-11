@@ -335,7 +335,7 @@ async function responderConsulta(q) {
       return `${q.cliente} te debe ${money(rows[0].total)} (${rows[0].n} trabajo(s) sin cobrar).`;
     }
     const { rows } = await query(`SELECT COUNT(*)::int n, COALESCE(SUM(precio),0) total FROM trabajos WHERE estado='finalizado' AND NOT pagado`);
-    return `Por cobrar en total: ${money(rows[0].total)} (${rows[0].n} trabajo(s) finalizados sin cobrar).`;
+    return `📋 TRABAJOS por cobrar: ${money(rows[0].total)} (${rows[0].n} finalizados sin cobrar).\n(Si querías cheques, decí "ver cheques".)`;
   }
   if (tipo === 'ventas_periodo') {
     const { rows } = await query(`SELECT COUNT(*)::int n, COALESCE(SUM(precio),0) total FROM trabajos WHERE estado='finalizado'` + perSQL);
@@ -361,10 +361,19 @@ async function crearCheque(d) {
   await audit(null, 'ingesta', 'cheque', rows[0].id, null);
   return rows[0];
 }
-async function listarCheques() {
-  const { rows } = await query(`SELECT id, tipo, importe, relacionado, fecha_cobro FROM cheques WHERE estado='pendiente' ORDER BY fecha_cobro NULLS LAST, id LIMIT 12`);
-  if (!rows.length) return 'No hay cheques pendientes 👍';
-  return 'Cheques pendientes:\n' + rows.map((r) => `#${r.id} ${r.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${r.relacionado || '—'} ${money(r.importe)}${r.fecha_cobro ? ` (${fmtFecha(r.fecha_cobro)})` : ''}`).join('\n') + '\n\nDecime "cobré el cheque de X" cuando entre.';
+async function listarCheques(filtro) {
+  const cond = filtro === 'emitido' ? " AND tipo='emitido'" : filtro === 'recibido' ? " AND tipo='recibido'" : '';
+  const { rows } = await query(`SELECT id, tipo, importe, relacionado, fecha_cobro FROM cheques WHERE estado='pendiente'${cond} ORDER BY fecha_cobro NULLS LAST, id LIMIT 12`);
+  if (!rows.length) {
+    return filtro === 'emitido' ? 'No hay cheques por pagar 👍'
+      : filtro === 'recibido' ? 'No hay cheques por cobrar 👍'
+      : 'No hay cheques pendientes 👍';
+  }
+  const titulo = filtro === 'emitido' ? '🧾 Cheques por pagar (emitidos)'
+    : filtro === 'recibido' ? '🧾 Cheques por cobrar (recibidos)'
+    : '🧾 Cheques pendientes';
+  const total = rows.reduce((a, r) => a + Number(r.importe || 0), 0);
+  return `${titulo} — ${rows.length} por ${money(total)}:\n` + rows.map((r) => `#${r.id} ${r.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${r.relacionado || '—'} ${money(r.importe)}${r.fecha_cobro ? ` (${fmtFecha(r.fecha_cobro)})` : ''}`).join('\n') + '\n\nDecime "cobré el cheque de X" cuando entre.';
 }
 async function marcarChequeCobrado(nombre) {
   const cond = nombre ? `relacionado ILIKE '%'||$1||'%'` : 'TRUE';
@@ -514,15 +523,15 @@ function promptClasificar(texto, ctxNegocio) {
     + `- actualizar_trabajo: cambio sobre un trabajo YA existente (se terminó/cobró/facturó, cambiar estado/precio/disciplina, presupuestar). Ej: "el de andreu se entregó", "poné el 3 en espera", "presupuestá el 5 en 40 lucas".\n`
     + `- consulta: pregunta datos de plata/trabajos. Ej: "cuánto le facturé a X", "qué me deben", "cuánto vendí este mes", "trabajos de X".\n`
     + `- nuevo_cheque: menciona un CHEQUE que recibió o entregó. Ej: "me dieron un cheque de andreu por 200 lucas a 30 días".\n`
-    + `- ver_cheques: quiere ver los cheques pendientes. cheque_cobrado: un cheque ya se cobró/depositó ("cobré el cheque de X", "entró el cheque").\n`
-    + `- nuevo_pago: un SERVICIO o gasto fijo a pagar (luz, gas, alquiler, internet, impuestos, proveedor). Ej: "hay que pagar la luz 30 lucas el viernes".\n`
-    + `- ver_pagos: quiere ver los pagos pendientes. pago_hecho: ya pagó un servicio ("pagué la luz", "ya está el alquiler").\n`
-    + `- nueva_compra: agregar un INSUMO/material a la lista de compras (tinta, vinilo, papel). Ej: "anotá que falta tinta negra".\n`
-    + `- ver_compras: quiere ver la lista de compras. compra_hecha: ya compró un insumo ("compré la tinta", "ya traje los rollos").\n`
+    + `- ver_cheques: pregunta por CHEQUES pendientes, en cualquier dirección. Ej: "¿hay cheques por pagar?", "¿qué cheques hay que pagar?", "¿qué cheques entran?", "¿tengo cheques por cobrar?", "ver cheques". cheque_cobrado: un cheque ya se cobró/depositó ("cobré el cheque de X", "entró el cheque").\n`
+    + `- nuevo_pago: llega o hay que pagar un SERVICIO o gasto fijo (luz, gas, agua, alquiler, internet, impuestos, proveedor). Ej: "hay que pagar la luz 30 lucas el viernes", "llegó la factura de la luz", "vino la boleta del gas, 45 lucas", "el internet vence el 15". Palabras clave: factura, boleta, vencimiento, servicio.\n`
+    + `- ver_pagos: pregunta qué servicios hay que pagar. Ej: "¿qué hay que pagar?", "¿qué facturas vencen?", "¿debo algún servicio?", "ver pagos". pago_hecho: YA lo pagó ("pagué la luz", "ya está el alquiler", "salió el gas").\n`
+    + `- nueva_compra: anotar un INSUMO/material para comprar (tinta, vinilo, papel, planchas). Ej: "anotá que falta tinta negra", "se acabó el papel", "hay que comprar vinilo blanco", "traé 2 rollos de lona". Palabras clave: falta, se acabó, comprar, traer.\n`
+    + `- ver_compras: pregunta qué falta comprar. Ej: "¿qué hay que comprar?", "¿qué falta?", "lista de compras". compra_hecha: YA lo compró ("compré la tinta", "ya traje los rollos").\n`
     + `- ayuda: no sabe qué puede hacer o pide instrucciones. Ej: "qué puedo hacer", "cómo funciona esto", "ayuda".\n`
     + `- ver_activos / ver_bandeja / ver_sin_presupuestar: pide ver esas listas. resumen: "cómo viene/menú/hola".\n`
     + `- confirmar/descartar: "ok/sí" o "no" a un borrador.\n\n`
-    + `Distinguí bien: pagar un servicio/gasto (nuevo_pago) es distinto de comprar un insumo (nueva_compra). Un cheque siempre lleva la palabra cheque.\n`
+    + `Distinguí bien: (1) FACTURA/boleta/servicio que se PAGA = pagos; INSUMO/material que se COMPRA en un comercio = compras. (2) El tiempo verbal decide entre anotar y tachar: "hay que pagar / llegó / falta / se acabó" = anotar pendiente (nuevo_pago / nueva_compra); "pagué / ya está / compré / traje" = marcar hecho (pago_hecho / compra_hecha). (3) Un cheque siempre lleva la palabra cheque; si la pregunta menciona CHEQUES ("¿hay cheques por pagar/cobrar?") es ver_cheques, NUNCA consulta: consulta es SOLO para plata de trabajos ("qué me deben", "cuánto facturé").\n`
     + `Reglas de cliente (usá las listas de arriba): empresa conocida => empresa; contacto conocido => persona; "X de Y" => contacto X, empresa Y; nombre suelto desconocido => contacto (individual), empresa "". Nunca pongas "cliente individual" como nombre; si no hay empresa, empresa: "".\n`
     + `Jerga: lucas=miles (80 lucas=80000), palo=millón, gamba=100.`;
 }
@@ -796,7 +805,12 @@ router.post('/mensaje', async (req, res) => {
   }
 
   // ----- Cheques -----
-  if (intent === 'ver_cheques') return res.json({ reply: await listarCheques() });
+  if (intent === 'ver_cheques') {
+    // Dirección pedida en el propio texto: "por pagar" = emitidos, "por cobrar / entran" = recibidos.
+    const filtro = /pagar|emitid|salen|debo pagar/i.test(texto) ? 'emitido'
+      : /cobrar|recibid|entra/i.test(texto) ? 'recibido' : null;
+    return res.json({ reply: await listarCheques(filtro) });
+  }
   if (intent === 'nuevo_cheque') {
     const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
     const ch = await crearCheque(c);
