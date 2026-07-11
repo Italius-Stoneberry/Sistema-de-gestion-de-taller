@@ -1,7 +1,9 @@
 /* ================================================================
    GRAFICARTE — Capa de estilos del sistema de taller.
    Construida sobre brand/tokens.css (identidad de marca).
-   Da estilo a los elementos que genera app.js sin tocar su lógica.
+   Reglas del sistema: profundidad con bordes 1px y capas tonales
+   (sin sombras salvo hover de acción primaria), radios 4/8,
+   dorado = acción/activo, negro = estructura, rojo = crítico.
    ================================================================ */
 
 * { box-sizing: border-box; }
@@ -9,7 +11,7 @@ body {
   margin: 0;
   font: var(--ga-body);
   color: var(--ga-tinta);
-  background: var(--ga-papel);
+  background: var(--ga-superficie);
   -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3 { font-family: var(--ga-font-titulo); letter-spacing: -0.02em; color: var(--ga-tinta); }
@@ -22,9 +24,10 @@ h3 { font: var(--ga-h3); margin: var(--ga-sp-3) 0 var(--ga-sp-1); }
 .pantalla { min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 24px; }
 .login-card {
   display: flex; flex-direction: column; gap: 14px;
-  width: 360px; max-width: 100%;
+  width: 380px; max-width: 100%;
   background: var(--ga-papel);
   border: 1px solid var(--ga-linea);
+  border-top: 4px solid var(--ga-dorado);
   border-radius: var(--ga-radio-lg);
   padding: var(--ga-sp-3);
 }
@@ -37,11 +40,13 @@ h3 { font: var(--ga-h3); margin: var(--ga-sp-3) 0 var(--ga-sp-1); }
   display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
   padding: 0 var(--ga-sp-3); height: 60px;
   background: var(--ga-negro); color: var(--ga-papel);
+  border-bottom: 2px solid var(--ga-dorado);
+  position: sticky; top: 0; z-index: 40;
 }
 .barra-logo { height: 30px; }
 .barra .spacer { flex: 1; }
-#usuario-actual { font-size: .85rem; color: #cfcccb; }
-.link { border: none; background: none; color: var(--ga-dorado); cursor: pointer; font: 600 .875rem/1 var(--ga-font-cuerpo); }
+#usuario-actual { font-size: .85rem; color: #cfcccb; white-space: nowrap; }
+.link { border: none; background: none; color: var(--ga-dorado); cursor: pointer; font: 600 .875rem/1 var(--ga-font-cuerpo); padding: 8px 0; }
 .link:hover { color: var(--ga-dorado-hover); text-decoration: underline; }
 
 /* menú de navegación */
@@ -58,9 +63,15 @@ h3 { font: var(--ga-h3); margin: var(--ga-sp-3) 0 var(--ga-sp-1); }
 /* ---------- CONTENIDO ---------- */
 main { padding: var(--ga-sp-3); max-width: var(--ga-contenedor); margin: 0 auto; }
 
-/* filtros */
-.filtros { display: flex; gap: var(--ga-sp-2); flex-wrap: wrap; align-items: end; margin-bottom: var(--ga-sp-2); }
-.filtros label { display: flex; flex-direction: column; gap: 4px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
+/* filtros: panel tonal */
+.filtros {
+  display: flex; gap: var(--ga-sp-2); flex-wrap: wrap; align-items: end;
+  background: var(--ga-panel); border: 1px solid var(--ga-linea);
+  border-radius: var(--ga-radio-lg);
+  padding: var(--ga-sp-2);
+  margin-bottom: var(--ga-sp-2);
+}
+.filtros label { display: flex; flex-direction: column; gap: 5px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
 
 /* inputs y selects (genéricos, look de marca) */
 input, select, textarea {
@@ -70,7 +81,9 @@ input, select, textarea {
   padding: 8px 12px; outline: none;
   transition: border-color .2s, box-shadow .2s;
 }
+input:hover, select:hover, textarea:hover { border-color: var(--ga-contorno); }
 input:focus, select:focus, textarea:focus { border-color: var(--ga-dorado); box-shadow: 0 0 0 3px rgba(246,168,0,.18); }
+textarea { min-height: 64px; resize: vertical; }
 
 /* botones (por defecto sobrios; helpers para acción/crítico) */
 button {
@@ -80,6 +93,7 @@ button {
   transition: background .2s, color .2s, border-color .2s, box-shadow .25s;
 }
 button:hover { background: var(--ga-panel-2); }
+button:focus-visible { outline: 2px solid var(--ga-dorado); outline-offset: 2px; }
 .btn-primary { background: var(--ga-dorado); color: var(--ga-negro); border-color: var(--ga-dorado); }
 .btn-primary:hover { background: var(--ga-dorado-hover); border-color: var(--ga-dorado-hover); box-shadow: var(--ga-sombra-dorada); }
 .btn-dark { background: var(--ga-negro); color: #fff; border-color: var(--ga-negro); }
@@ -88,14 +102,22 @@ button:hover { background: var(--ga-panel-2); }
 .btn-danger:hover { background: var(--ga-rojo); color: #fff; border-color: var(--ga-rojo); }
 
 /* ---------- TABLAS ---------- */
-table { width: 100%; border-collapse: collapse; font: var(--ga-body-sm); margin-top: var(--ga-sp-1); background: var(--ga-papel); }
+table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font: var(--ga-body-sm); margin-top: var(--ga-sp-1);
+  background: var(--ga-papel);
+  border: 1px solid var(--ga-linea); border-radius: var(--ga-radio-lg);
+  overflow: hidden;
+}
 th {
-  text-align: left; padding: 10px 14px;
+  text-align: left; padding: 11px 14px;
   font: var(--ga-label); letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ga-texto-2); border-bottom: 1px solid var(--ga-contorno); white-space: nowrap;
+  color: var(--ga-texto-2); background: var(--ga-superficie);
+  border-bottom: 1px solid var(--ga-contorno); white-space: nowrap;
 }
 td { padding: 11px 14px; border-bottom: 1px solid var(--ga-linea); vertical-align: middle; }
-tr:hover td { background: var(--ga-superficie); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: var(--ga-superficie); }
 .acciones { display: flex; gap: 6px; flex-wrap: wrap; }
 .acciones button { padding: 6px 10px; font-size: .8rem; }
 
@@ -104,35 +126,85 @@ tr:hover td { background: var(--ga-superficie); }
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 10px; border-radius: var(--ga-radio-sm);
   font: 600 11px/1 var(--ga-font-cuerpo); letter-spacing: .06em; text-transform: uppercase;
+  white-space: nowrap;
 }
 .badge-activo  { background: rgba(246,168,0,.16); color: var(--ga-dorado-texto); }   /* en progreso / activo */
 .badge-neutro  { background: var(--ga-panel-2);   color: var(--ga-texto-2); }         /* pedido / espera / genérico */
 .badge-ok      { background: var(--ga-negro);      color: #fff; }                      /* finalizado / pagado / facturado */
 .badge-alerta  { background: rgba(211,0,8,.10);    color: var(--ga-rojo); }            /* sin cobrar / urgente / rechazado */
 
-/* ---------- DASHBOARD (tarjetas) ---------- */
+/* ---------- DASHBOARD (tarjetas de resumen) ---------- */
 .tarjetas { display: flex; gap: var(--ga-sp-2); flex-wrap: wrap; margin-bottom: var(--ga-sp-2); }
 .tarjeta {
-  background: var(--ga-panel); border: 1px solid var(--ga-linea);
+  background: var(--ga-papel); border: 1px solid var(--ga-linea);
+  border-top: 3px solid var(--ga-dorado);
   border-radius: var(--ga-radio-lg); padding: var(--ga-sp-2) var(--ga-sp-3);
-  min-width: 170px; transition: border-color .25s, background .25s;
+  min-width: 170px; flex: 0 1 auto;
+  transition: border-color .25s, background .25s;
 }
-.tarjeta:hover { border-color: var(--ga-contorno); background: var(--ga-papel); }
+.tarjeta:hover { border-color: var(--ga-contorno); border-top-color: var(--ga-dorado-hover); }
 .tarjeta > div:first-child { font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
 .tarjeta .num { font: 800 2rem/1.1 var(--ga-font-titulo); color: var(--ga-tinta); margin: 6px 0 2px; }
 
 /* ---------- MODAL ---------- */
-.modal-fondo { position: fixed; inset: 0; background: rgba(18,18,18,.5); display: flex; justify-content: center; align-items: flex-start; padding: 40px 24px; overflow: auto; z-index: 50; }
+.modal-fondo {
+  position: fixed; inset: 0; background: rgba(18,18,18,.55);
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 40px 24px; overflow: auto; z-index: 50;
+}
 .modal {
   background: var(--ga-papel); border: 1px solid var(--ga-contorno);
+  border-top: 4px solid var(--ga-dorado);
   border-radius: var(--ga-radio-lg); padding: var(--ga-sp-3);
-  width: 480px; max-width: 100%;
+  width: 520px; max-width: 100%;
 }
-.modal h3 { margin: 0 0 var(--ga-sp-2); font: var(--ga-h3); }
+.modal h3 { margin: 0 0 var(--ga-sp-2); padding-bottom: var(--ga-sp-1); font: var(--ga-h3); border-bottom: 1px solid var(--ga-linea); }
 .modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ga-sp-2); }
-.modal label { display: flex; flex-direction: column; gap: 4px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
-.modal label.full { grid-column: 1 / -1; }
-.modal .acciones { margin-top: var(--ga-sp-3); }
+.modal label { display: flex; flex-direction: column; gap: 5px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
+/* .full ocupa las dos columnas — vale para labels Y para bloques como la galería de fotos */
+.modal .grid .full, .modal label.full { grid-column: 1 / -1; }
+.modal .acciones { margin-top: var(--ga-sp-3); justify-content: flex-end; }
+
+/* ---------- Galería de adjuntos (imágenes: sin radio, regla de marca) ---------- */
+.galeria-tit { font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); margin-bottom: 6px; }
+.galeria { display: flex; flex-wrap: wrap; gap: 10px; }
+.galeria-vacia { color: var(--ga-texto-2); font-size: .85rem; }
+.foto { position: relative; width: 92px; }
+.foto img {
+  display: block;
+  width: 92px; height: 92px; object-fit: cover;
+  border: 1px solid var(--ga-linea);
+  background: var(--ga-panel-2);
+  cursor: zoom-in;
+  transition: border-color .2s;
+}
+.foto img:hover { border-color: var(--ga-dorado); }
+.foto-cap { font-size: 11px; color: var(--ga-texto-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foto-del { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 50%; background: rgba(18,18,18,.75); color: #fff; border: none; cursor: pointer; }
+.foto-del:hover { background: var(--ga-rojo); }
+
+/* ---------- Acciones de un toque (fluidez) ---------- */
+.clic { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--ga-radio-sm); }
+.clic:hover { filter: brightness(0.96); }
+.clic:active { transform: scale(0.96); }
+.clic .adv { color: var(--ga-dorado-texto); font-size: 11px; }
+
+/* ---------- Toasts (avisos no bloqueantes) ---------- */
+#toasts {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 100; width: min(92vw, 420px); pointer-events: none;
+}
+.toast {
+  padding: 12px 16px; border-radius: var(--ga-radio-sm);
+  font: 600 .875rem/1.35 var(--ga-font-cuerpo);
+  background: var(--ga-negro); color: #fff;
+  border-left: 4px solid var(--ga-dorado);
+  animation: toast-in .25s ease;
+}
+.toast-error { background: var(--ga-rojo); border-left-color: var(--ga-rojo-oscuro); }
+.toast.irse { opacity: 0; transition: opacity .3s; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* ================= RESPONSIVE / MÓVIL ================= */
 @media (max-width: 720px) {
@@ -157,12 +229,13 @@ tr:hover td { background: var(--ga-superficie); }
   /* Tablas de datos → tarjetas apiladas: cada fila es una tarjeta con
      etiqueta (nombre de columna) a la izquierda y valor a la derecha.
      app.js copia los th a data-label de cada td automáticamente. */
-  table, tbody { display: block; }
+  table, tbody { display: block; border: none; background: transparent; }
   thead { display: none; }
   tbody tr {
     display: block;
     background: var(--ga-papel);
     border: 1px solid var(--ga-linea);
+    border-left: 3px solid var(--ga-dorado);
     border-radius: var(--ga-radio-lg);
     padding: 6px 0;
     margin-bottom: 10px;
@@ -179,6 +252,7 @@ tr:hover td { background: var(--ga-superficie); }
   }
   tbody td:not([data-label])::before { content: none; }
   tbody td:empty { display: none; }
+  tbody tr:last-child td { border-bottom: none; }
   tbody td.acciones { justify-content: flex-end; padding-top: 10px; }
 
   /* Tarjetas del dashboard: 2 por fila */
@@ -186,9 +260,10 @@ tr:hover td { background: var(--ga-superficie); }
   .tarjeta { flex: 1 1 calc(50% - 5px); min-width: 0; padding: 12px 16px; }
   .tarjeta .num { font-size: 1.7rem; }
 
-  /* Botones un poco más grandes para el dedo */
+  /* Botones y toques más grandes para el dedo */
   button { padding: 10px 16px; }
   .acciones button { padding: 8px 12px; }
+  .clic .badge { padding: 7px 12px; }
 }
 
 @media (max-width: 520px) {
@@ -198,39 +273,3 @@ tr:hover td { background: var(--ga-superficie); }
   .tarjeta { flex: 1 1 100%; }
   .login-card { padding: var(--ga-sp-2); }
 }
-
-/* ---------- Galería de adjuntos (imágenes) ---------- */
-.galeria-tit { font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); margin-bottom: 6px; }
-.galeria { display: flex; flex-wrap: wrap; gap: 10px; }
-.galeria-vacia { color: var(--ga-texto-2); font-size: .85rem; }
-.foto { position: relative; width: 92px; }
-.foto img { width: 92px; height: 92px; object-fit: cover; border-radius: var(--ga-radio-sm); border: 1px solid var(--ga-linea); cursor: pointer; background: var(--ga-panel-2); }
-.foto-cap { font-size: 11px; color: var(--ga-texto-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.foto-del { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 50%; background: rgba(18,18,18,.75); color: #fff; border: none; cursor: pointer; }
-.foto-del:hover { background: var(--ga-rojo); }
-
-/* ---------- Acciones de un toque (fluidez) ---------- */
-.clic { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--ga-radio-sm); }
-.clic:hover { filter: brightness(0.96); }
-.clic:active { transform: scale(0.96); }
-.clic .adv { color: var(--ga-dorado-texto); font-size: 11px; }
-@media (max-width: 720px) {
-  .clic .badge { padding: 7px 12px; }   /* target más grande para el dedo */
-}
-
-/* ---------- Toasts (avisos no bloqueantes) ---------- */
-#toasts {
-  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-  display: flex; flex-direction: column; gap: 8px;
-  z-index: 100; width: min(92vw, 420px); pointer-events: none;
-}
-.toast {
-  padding: 12px 16px; border-radius: var(--ga-radio-sm);
-  font: 600 .875rem/1.35 var(--ga-font-cuerpo);
-  background: var(--ga-negro); color: #fff;
-  box-shadow: 0 6px 24px rgba(0,0,0,.25);
-  animation: toast-in .25s ease;
-}
-.toast-error { background: var(--ga-rojo); }
-.toast.irse { opacity: 0; transition: opacity .3s; }
-@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
