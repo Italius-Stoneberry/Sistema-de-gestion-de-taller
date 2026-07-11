@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS trabajos (
   contacto               TEXT,
   descripcion            TEXT,
   disciplina             TEXT NOT NULL
-                         CHECK (disciplina IN ('laser','serigrafia','ploteo')),
+                         CHECK (disciplina IN ('laser','serigrafia','ploteo','impresion')),
   estado                 TEXT NOT NULL DEFAULT 'pedido'
                          CHECK (estado IN ('cotizar','presupuestado','pedido','en_progreso','en_espera','finalizado')),
   -- Subestados de "finalizado": dos ejes independientes
@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS cheques (
   importe       NUMERIC(12,2) NOT NULL DEFAULT 0,
   fecha_emision DATE,
   fecha_cobro   DATE,          -- fecha de cobro / vencimiento
+  modalidad     TEXT NOT NULL DEFAULT 'fisico'
+                CHECK (modalidad IN ('fisico','electronico')),   -- físico (papel) o e-check
   estado        TEXT NOT NULL DEFAULT 'pendiente'
                 CHECK (estado IN ('pendiente','cobrado','depositado','rechazado')),
   relacionado   TEXT,          -- cliente o proveedor

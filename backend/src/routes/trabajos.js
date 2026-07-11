@@ -6,7 +6,7 @@ import { resolverEmpresa, resolverContacto } from '../resolvers.js';
 const router = Router();
 router.use(requiereAuth);
 
-const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
+const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo', 'impresion'];
 const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera', 'finalizado'];
 
 // Resuelve empresa y contacto a partir de ids o nombres (los crea si no existen).

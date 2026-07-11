@@ -17,9 +17,10 @@ const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFract
 const fecha = (d) => (d ? String(d).slice(0, 10) : '');
 
 const LBL = {
-  disciplina: { laser: 'Láser', serigrafia: 'Serigrafía', ploteo: 'Ploteo/Cartelería' },
+  disciplina: { laser: 'Láser', serigrafia: 'Serigrafía', ploteo: 'Ploteo/Cartelería', impresion: 'Impresión' },
   estado: { cotizar: 'Por cotizar', presupuestado: 'Presupuestado', pedido: 'Pedido', en_progreso: 'En progreso', en_espera: 'En espera', finalizado: 'Finalizado' },
   cheque_tipo: { recibido: 'Recibido', emitido: 'Emitido' },
+  cheque_modalidad: { fisico: 'Físico', electronico: 'E-check' },
   cheque_estado: { pendiente: 'Pendiente', cobrado: 'Cobrado', depositado: 'Depositado', rechazado: 'Rechazado' },
   pago_estado: { pendiente: 'Pendiente', pagado: 'Pagado' },
 };
@@ -284,7 +285,7 @@ async function cargarCheques() {
   $('#lista-cheques').innerHTML = filas.length ? `
     <table><thead><tr><th>Tipo</th><th>Nº</th><th>Banco</th><th>Relacionado</th><th>Importe</th><th>Cobro/Venc.</th><th>Estado</th><th></th></tr></thead><tbody>
     ${filas.map((c) => `<tr>
-      <td>${LBL.cheque_tipo[c.tipo]}${c.origen === 'ia' && !c.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(c.numero)}</td><td>${esc(c.banco)}</td>
+      <td>${LBL.cheque_tipo[c.tipo]}${c.modalidad === 'electronico' ? ' <span class="badge badge-neutro">E-check</span>' : ''}${c.origen === 'ia' && !c.revisado ? ' <em>(IA)</em>' : ''}</td><td>${esc(c.numero)}</td><td>${esc(c.banco)}</td>
       <td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td><td>${fecha(c.fecha_cobro)}</td>
       <td>${badgeCheque(c.estado)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${c.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${c.id}" class="btn-danger">Eliminar</button>` : ''}</td>
@@ -298,6 +299,7 @@ function formCheque(c, onDone) {
   abrirModal(`${c.id ? 'Editar' : 'Nuevo'} cheque`, `
     <div class="grid">
       <label>Tipo <select name="tipo">${opts(LBL.cheque_tipo, c.tipo)}</select></label>
+      <label>Modalidad <select name="modalidad">${opts(LBL.cheque_modalidad, c.modalidad || 'fisico')}</select></label>
       <label>Estado <select name="estado">${opts(LBL.cheque_estado, c.estado)}</select></label>
       <label>Número <input name="numero" value="${esc(c.numero)}" /></label>
       <label>Banco <input name="banco" value="${esc(c.banco)}" /></label>
@@ -306,7 +308,7 @@ function formCheque(c, onDone) {
       <label>Fecha emisión <input name="fecha_emision" type="date" value="${fecha(c.fecha_emision)}" /></label>
       <label>Fecha cobro/venc. <input name="fecha_cobro" type="date" value="${fecha(c.fecha_cobro)}" /></label>
     </div>`, async (f) => {
-    const body = { tipo: f.tipo.value, estado: f.estado.value, numero: f.numero.value, banco: f.banco.value,
+    const body = { tipo: f.tipo.value, modalidad: f.modalidad.value, estado: f.estado.value, numero: f.numero.value, banco: f.banco.value,
       importe: Number(f.importe.value || 0), relacionado: f.relacionado.value,
       fecha_emision: f.fecha_emision.value || null, fecha_cobro: f.fecha_cobro.value || null };
     if (c.id) await api('PUT', '/cheques/' + c.id, body); else await api('POST', '/cheques', body);

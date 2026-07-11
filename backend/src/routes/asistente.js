@@ -8,7 +8,7 @@ router.use(requiereIngest);
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:14b';
-const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo'];
+const DISCIPLINAS = ['laser', 'serigrafia', 'ploteo', 'impresion'];
 const ESTADOS = ['cotizar', 'presupuestado', 'pedido', 'en_progreso', 'en_espera', 'finalizado'];
 const LBL_ESTADO = { cotizar: 'por cotizar', presupuestado: 'presupuestado', pedido: 'pedido', en_progreso: 'en progreso', en_espera: 'en espera', finalizado: 'finalizado' };
 const AUTORIZADOS = (process.env.AUTORIZADOS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -30,7 +30,7 @@ const SCHEMA = {
   clasificar: {
     type: 'object',
     properties: {
-      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar', 'nuevo_cheque', 'ver_cheques', 'cheque_cobrado', 'nuevo_pago', 'ver_pagos', 'pago_hecho', 'nueva_compra', 'ver_compras', 'compra_hecha'] },
+      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar', 'nuevo_cheque', 'ver_cheques', 'cheque_cobrado', 'nuevo_pago', 'ver_pagos', 'pago_hecho', 'nueva_compra', 'ver_compras', 'compra_hecha', 'ayuda'] },
       id: NUL('integer'), empresa: NUL('string'), contacto: NUL('string'),
       descripcion: NUL('string'), disciplina: NUL('string'), precio: NUL('integer'),
     },
@@ -64,10 +64,11 @@ const SCHEMA = {
     type: 'object',
     properties: {
       tipo: { type: 'string', enum: ['recibido', 'emitido'] },
+      modalidad: { type: 'string', enum: ['fisico', 'electronico'] },
       importe: NUL('integer'), banco: NUL('string'),
       relacionado: NUL('string'), fecha_cobro: NUL('string'),
     },
-    required: ['tipo', 'importe'],
+    required: ['tipo', 'modalidad', 'importe'],
   },
   pago: {
     type: 'object',
@@ -134,6 +135,26 @@ async function menuTexto() {
   const c = await contar();
   return `🤖 ¡Buenas! Tenés:\n• ${c.activos} trabajos en curso\n• ${c.bandeja} en la bandeja sin confirmar\n• ${c.sin_presup} sin presupuestar\n\nHablame normal: cargá pedidos, actualizá estados, anotá cheques ("me dieron un cheque de X"), pagos ("hay que pagar la luz") o compras ("falta tinta"). También preguntame "qué me deben", "ver cheques", "ver compras".`;
 }
+function ayudaTexto() {
+  return `🤖 Soy tu asistente del taller. Hablame como quieras, en criollo. Esto es lo que puedo hacer:\n\n`
+    + `📋 *TRABAJOS*\n`
+    + `• Cargar: "ramiro quiere 100 volantes a 80 lucas"\n`
+    + `• Actualizar: "el de andreu se entregó y se cobró", "poné el 3 en espera"\n`
+    + `• Presupuestar: "presupuestá el 5 en 40 lucas"\n\n`
+    + `🧾 *CHEQUES*\n`
+    + `• Anotar: "me dieron un cheque de andreu por 200 lucas a 30 días"\n`
+    + `• Ver / cobrar: "ver cheques", "cobré el cheque de andreu"\n\n`
+    + `💡 *PAGOS Y SERVICIOS*\n`
+    + `• Anotar: "hay que pagar la luz 30 lucas el viernes"\n`
+    + `• Ver / pagar: "ver pagos", "pagué la luz"\n\n`
+    + `🛒 *COMPRAS*\n`
+    + `• Anotar: "falta tinta negra"\n`
+    + `• Ver / tachar: "ver compras", "ya compré la tinta"\n\n`
+    + `❓ *PREGUNTARME*\n`
+    + `• "¿qué me deben?", "¿cuánto le facturé a andreu?", "¿cuánto vendí este mes?", "trabajos de ramiro"\n\n`
+    + `Cuando anoto algo te pido confirmación: respondé *"ok"* para guardarlo o *"no"* para descartarlo.\n`
+    + `Escribí *"menu"* para el resumen del día, o *"ayuda"* para ver esto de nuevo. 👍`;
+}
 async function listarActivos(chatId) {
   const { rows } = await query(`SELECT id, cliente, descripcion, estado FROM trabajos WHERE estado IN ('pedido','en_progreso','en_espera') AND revisado ORDER BY actualizado_en ASC LIMIT 8`);
   if (!rows.length) { if (chatId) await setCtx(chatId, 'idle', {}); return 'No hay trabajos en curso 👍'; }
@@ -142,9 +163,13 @@ async function listarActivos(chatId) {
   return 'Trabajos en curso:\n' + lista.map((x) => `${x.n}) #${x.id} ${x.cliente} — ${x.descripcion || ''} [${LBL_ESTADO[x.estado]}]`).join('\n') + '\n\nContame qué pasó, ej: "el 1 se terminó y se cobró".';
 }
 async function listarBandeja() {
-  const { rows } = await query('SELECT id, cliente, descripcion, precio FROM trabajos WHERE revisado = FALSE ORDER BY creado_en DESC LIMIT 10');
-  if (!rows.length) return 'La bandeja está vacía 👍';
-  return 'Bandeja (sin confirmar):\n' + rows.map((r) => `#${r.id} ${r.cliente} — ${r.descripcion || ''} (${money(r.precio)})`).join('\n') + '\n\nRespondé "ok #<n>" para confirmar o "no #<n>" para descartar.';
+  const tr = await query('SELECT id, cliente, descripcion, precio FROM trabajos WHERE revisado = FALSE ORDER BY creado_en DESC LIMIT 10');
+  const ch = await query('SELECT id, tipo, relacionado, importe FROM cheques WHERE revisado = FALSE ORDER BY creado_en DESC LIMIT 10');
+  if (!tr.rows.length && !ch.rows.length) return 'La bandeja está vacía 👍';
+  const lineas = [];
+  if (tr.rows.length) lineas.push('Trabajos:\n' + tr.rows.map((r) => `#${r.id} ${r.cliente} — ${r.descripcion || ''} (${money(r.precio)})`).join('\n'));
+  if (ch.rows.length) lineas.push('Cheques:\n' + ch.rows.map((r) => `#${r.id} ${r.tipo === 'recibido' ? 'de' : 'a'} ${r.relacionado || '—'} ${money(r.importe)}`).join('\n'));
+  return 'Bandeja (sin confirmar):\n' + lineas.join('\n\n') + '\n\nRespondé "ok" para confirmar el último, o "ok #<n>" / "no #<n>" para uno puntual.';
 }
 async function listarSinPresup() {
   const { rows } = await query("SELECT id, cliente, descripcion FROM trabajos WHERE estado = 'cotizar' AND revisado ORDER BY creado_en ASC LIMIT 10");
@@ -177,6 +202,16 @@ async function crearBorradorDesde(d) {
     [cliente, empresaId, contactoId, d.descripcion || null, disciplina, Number(d.precio) || 0, 'WhatsApp']);
   await audit(null, 'ingesta', 'trabajo', rows[0].id, null);
   return rows[0];
+}
+// Confirma o descarta un borrador concreto (trabajo/cheque/pago) por tipo + id.
+async function confirmarEntidad(tipo, accion, id) {
+  const tabla = tipo === 'cheque' ? 'cheques' : tipo === 'pago' ? 'pagos_servicios' : 'trabajos';
+  if (accion === 'descartar') {
+    const { rows } = await query(`DELETE FROM ${tabla} WHERE id = $1 AND revisado = FALSE RETURNING id`, [id]);
+    return rows[0] ? { accion: 'descartado', id } : null;
+  }
+  const { rows } = await query(`UPDATE ${tabla} SET revisado = TRUE WHERE id = $1 RETURNING id`, [id]);
+  return rows[0] ? { accion: 'confirmado', id } : null;
 }
 async function confirmarBorrador(accion, id) {
   if (!id) {
@@ -248,11 +283,13 @@ async function responderConsulta(q) {
 // ---- Cheques ----
 async function crearCheque(d) {
   const tipo = d.tipo === 'emitido' ? 'emitido' : 'recibido';
+  const modalidad = d.modalidad === 'electronico' ? 'electronico' : 'fisico';
+  // Nace como BORRADOR (revisado=FALSE): entra a la Bandeja hasta que se confirma.
   const { rows } = await query(
-    `INSERT INTO cheques (tipo, banco, importe, fecha_cobro, estado, relacionado, origen, revisado)
-     VALUES ($1,$2,$3,$4,'pendiente',$5,'ia',TRUE) RETURNING *`,
-    [tipo, d.banco || null, Number(d.importe) || 0, fechaValida(d.fecha_cobro), d.relacionado || null]);
-  await audit(null, 'asistente', 'cheque', rows[0].id, null);
+    `INSERT INTO cheques (tipo, modalidad, banco, importe, fecha_cobro, estado, relacionado, origen, revisado, origen_ref)
+     VALUES ($1,$2,$3,$4,$5,'pendiente',$6,'ia',FALSE,'WhatsApp') RETURNING *`,
+    [tipo, modalidad, d.banco || null, Number(d.importe) || 0, fechaValida(d.fecha_cobro), d.relacionado || null]);
+  await audit(null, 'ingesta', 'cheque', rows[0].id, null);
   return rows[0];
 }
 async function listarCheques() {
@@ -335,13 +372,14 @@ const esSi = (t) => /^(s[ií]|dale|obvio|sip|yes|ya|listo)\b/i.test(t);
 const esNo = (t) => /^(no|nop|todav[ií]a|a[uú]n no|negativo)\b/i.test(t);
 const esSaludo = (t) => ['hola', 'menu', 'menú', 'inicio', 'buenas', 'empezar', 'buen dia'].includes(t);
 const esSalir = (t) => ['salir', 'chau', 'gracias', 'nada'].includes(t);
+const esAyuda = (t) => /\bayuda\b|\bhelp\b|qu[eé] (puedo|pod[eé]s|se puede|podemos|sabes|sab[eé]s) hacer|para qu[eé] serv[ií]s|c[oó]mo funciona|qu[eé] hac[eé]s/i.test(t);
 
 function promptClasificar(texto, ctxNegocio) {
   return `Sos el asistente de un taller gráfico. Interpretás WhatsApp informal (jerga argentina).\n\n${ctxNegocio}\n\n`
     + `El usuario escribió: "${texto}".\nDevolvé SOLO un JSON con:\n`
     + `- "intencion": una de las de la lista.\n`
     + `- "id": número de trabajo si menciona uno (#5), si no null.\n`
-    + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo), "precio" (entero, 0 si no hay).\n\n`
+    + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo|impresion), "precio" (entero, 0 si no hay). impresion = tarjetería, lonas, fotocopias, folletería y afines.\n\n`
     + `Cómo elegir la intención:\n`
     + `- nuevo_trabajo: encarga un TRABAJO por primera vez (cliente + cantidad/producto). Ej: "ramiro quiere 100 volantes".\n`
     + `- actualizar_trabajo: cambio sobre un trabajo YA existente (se terminó/cobró/facturó, cambiar estado/precio/disciplina, presupuestar). Ej: "el de andreu se entregó", "poné el 3 en espera", "presupuestá el 5 en 40 lucas".\n`
@@ -352,6 +390,7 @@ function promptClasificar(texto, ctxNegocio) {
     + `- ver_pagos: quiere ver los pagos pendientes. pago_hecho: ya pagó un servicio ("pagué la luz", "ya está el alquiler").\n`
     + `- nueva_compra: agregar un INSUMO/material a la lista de compras (tinta, vinilo, papel). Ej: "anotá que falta tinta negra".\n`
     + `- ver_compras: quiere ver la lista de compras. compra_hecha: ya compró un insumo ("compré la tinta", "ya traje los rollos").\n`
+    + `- ayuda: no sabe qué puede hacer o pide instrucciones. Ej: "qué puedo hacer", "cómo funciona esto", "ayuda".\n`
     + `- ver_activos / ver_bandeja / ver_sin_presupuestar: pide ver esas listas. resumen: "cómo viene/menú/hola".\n`
     + `- confirmar/descartar: "ok/sí" o "no" a un borrador.\n\n`
     + `Distinguí bien: pagar un servicio/gasto (nuevo_pago) es distinto de comprar un insumo (nueva_compra). Un cheque siempre lleva la palabra cheque.\n`
@@ -367,7 +406,7 @@ function promptActualizar(texto, listaTxt) {
     + `- "estado": uno de [cotizar, presupuestado, pedido, en_progreso, en_espera, finalizado] si cambia el estado (terminó/entregó=finalizado, en espera=en_espera, empezó/haciendo=en_progreso), si no null.\n`
     + `- "pagado": true/false/null. "facturado": true/false/null.\n`
     + `- "precio": entero en pesos si menciona precio nuevo, si no null (lucas=miles).\n`
-    + `- "disciplina": laser|serigrafia|ploteo si la cambia, si no null.`;
+    + `- "disciplina": laser|serigrafia|ploteo|impresion si la cambia, si no null.`;
 }
 function promptConsulta(texto) {
   return `El usuario de un taller hace una consulta. Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
@@ -379,6 +418,7 @@ function promptConsulta(texto) {
 function promptCheque(texto) {
   return `Hoy es ${hoyISO()}. El usuario registra un CHEQUE del taller. Dijo: "${texto}".\nDevolvé SOLO JSON:\n`
     + `- "tipo": "recibido" (se lo dan / le pagan con cheque) o "emitido" (él lo entrega para pagar).\n`
+    + `- "modalidad": "electronico" si menciona e-check, echeck, cheque electrónico o digital; si no, "fisico" (cheque de papel).\n`
     + `- "importe": entero en pesos (lucas=miles, palo=millón, gamba=100), 0 si no dice.\n`
     + `- "banco": nombre del banco o null.\n`
     + `- "relacionado": nombre del cliente (si recibido) o proveedor (si emitido), o null.\n`
@@ -410,6 +450,7 @@ router.post('/mensaje', async (req, res) => {
   const esOpcion = (n) => t === String(n) || t === n + ')' || t === n + '.';
 
   if (esSalir(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: '👍 Cuando quieras.' }); }
+  if (esAyuda(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: ayudaTexto() }); }
   if (esSaludo(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: await menuTexto() }); }
 
   // Diálogo guiado de actualización (cuando pediste la lista)
@@ -438,6 +479,17 @@ router.post('/mensaje', async (req, res) => {
     await setCtx(from, 'idle', {}); return res.json({ reply: `✅ Listo #${ctx.datos.trabajo_id}, actualizado.` });
   }
 
+  // Atajo: "ok"/"no" sobre un borrador recién anotado → resolver sin llamar a la IA.
+  if (ctx.datos && ctx.datos.pendiente && ctx.datos.pendiente.id && (esSi(t) || esNo(t))) {
+    const pend = ctx.datos.pendiente;
+    const accion = esSi(t) ? 'confirmar' : 'descartar';
+    const r = await confirmarEntidad(pend.tipo, accion, pend.id);
+    await setCtx(from, 'idle', {});
+    const et = pend.tipo === 'cheque' ? 'Cheque' : pend.tipo === 'pago' ? 'Pago' : 'Trabajo';
+    if (!r) return res.json({ reply: 'No había nada pendiente.' });
+    return res.json({ reply: accion === 'descartar' ? `🗑 ${et} descartado.` : `✅ ${et} confirmado.` });
+  }
+
   if (esOpcion(1)) return res.json({ reply: await listarActivos(from) });
   if (esOpcion(2)) return res.json({ reply: await listarBandeja() });
   if (esOpcion(3)) return res.json({ reply: await listarSinPresup() });
@@ -453,8 +505,32 @@ router.post('/mensaje', async (req, res) => {
   if (intent === 'ver_bandeja') return res.json({ reply: await listarBandeja() });
   if (intent === 'ver_sin_presupuestar') return res.json({ reply: await listarSinPresup() });
   if (intent === 'resumen') return res.json({ reply: await menuTexto() });
+  if (intent === 'ayuda') return res.json({ reply: ayudaTexto() });
   if (intent === 'confirmar' || intent === 'descartar') {
-    const r = await confirmarBorrador(intent, idMenc);
+    const pend = ctx.datos && ctx.datos.pendiente;
+    const etiqueta = (tp) => tp === 'cheque' ? 'Cheque' : tp === 'pago' ? 'Pago' : 'Trabajo';
+    // 1) Algo recién anotado y sin #id → actuar sobre eso.
+    if (pend && pend.id && !idMenc) {
+      const r = await confirmarEntidad(pend.tipo, intent, pend.id);
+      await setCtx(from, 'idle', {});
+      if (!r) return res.json({ reply: 'No había nada pendiente para confirmar.' });
+      return res.json({ reply: r.accion === 'descartado' ? `🗑 ${etiqueta(pend.tipo)} descartado.` : `✅ ${etiqueta(pend.tipo)} confirmado.` });
+    }
+    // 2) Con #id → buscar el borrador en trabajos, cheques o pagos.
+    if (idMenc) {
+      for (const tp of ['trabajo', 'cheque', 'pago']) {
+        const tabla = tp === 'cheque' ? 'cheques' : tp === 'pago' ? 'pagos_servicios' : 'trabajos';
+        const hay = await query(`SELECT 1 FROM ${tabla} WHERE id = $1 AND revisado = FALSE`, [idMenc]);
+        if (hay.rows.length) {
+          const r = await confirmarEntidad(tp, intent, idMenc);
+          await setCtx(from, 'idle', {});
+          return res.json({ reply: r.accion === 'descartado' ? `🗑 ${etiqueta(tp)} #${idMenc} descartado.` : `✅ ${etiqueta(tp)} #${idMenc} confirmado.` });
+        }
+      }
+      return res.json({ reply: `No encontré el borrador #${idMenc}.` });
+    }
+    // 3) Fallback: último borrador de trabajo.
+    const r = await confirmarBorrador(intent, null);
     if (!r) return res.json({ reply: 'No hay borradores pendientes. Mandame un pedido o preguntame qué tenés.' });
     return res.json({ reply: r.accion === 'descartado' ? `🗑 Descartado #${r.id}` : `✅ Confirmado #${r.id} (${r.cliente})` });
   }
@@ -493,7 +569,8 @@ router.post('/mensaje', async (req, res) => {
   if (intent === 'nuevo_cheque') {
     const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
     const ch = await crearCheque(c);
-    return res.json({ reply: `🧾 Cheque anotado: ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)}${ch.fecha_cobro ? `, ${fmtFecha(ch.fecha_cobro)}` : ''}.` });
+    await setCtx(from, 'idle', { pendiente: { tipo: 'cheque', id: ch.id } });
+    return res.json({ reply: `🧾 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)}${ch.fecha_cobro ? `, ${fmtFecha(ch.fecha_cobro)}` : ''}.\nRespondé "ok" para confirmarlo o "no" para descartarlo.` });
   }
   if (intent === 'cheque_cobrado') {
     const r = await ollamaJSON(promptNombre(texto, 'cobró un cheque'), SCHEMA.refNombre);
@@ -529,6 +606,7 @@ router.post('/mensaje', async (req, res) => {
 
   // nuevo_trabajo (o fallback)
   const tr = await crearBorradorDesde(d);
+  await setCtx(from, 'idle', { pendiente: { tipo: 'trabajo', id: tr.id } });
   return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar o "no" para descartar.` });
 });
 

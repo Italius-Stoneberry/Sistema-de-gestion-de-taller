@@ -6,6 +6,7 @@ const router = Router();
 router.use(requiereAuth);
 
 const TIPOS = ['recibido', 'emitido'];
+const MODALIDADES = ['fisico', 'electronico'];
 const ESTADOS = ['pendiente', 'cobrado', 'depositado', 'rechazado'];
 
 // GET /api/cheques  (filtros: tipo, estado)
@@ -30,9 +31,10 @@ router.post('/', puedeEditar, async (req, res) => {
   if (!TIPOS.includes(b.tipo)) return res.status(400).json({ error: 'Tipo inválido' });
   const { rows } = await query(
     `INSERT INTO cheques
-      (tipo, numero, banco, importe, fecha_emision, fecha_cobro, estado, relacionado, trabajo_id, creado_por)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [b.tipo, b.numero || null, b.banco || null, b.importe || 0,
+      (tipo, modalidad, numero, banco, importe, fecha_emision, fecha_cobro, estado, relacionado, trabajo_id, creado_por)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [b.tipo, MODALIDADES.includes(b.modalidad) ? b.modalidad : 'fisico',
+     b.numero || null, b.banco || null, b.importe || 0,
      b.fecha_emision || null, b.fecha_cobro || null,
      ESTADOS.includes(b.estado) ? b.estado : 'pendiente',
      b.relacionado || null, b.trabajo_id || null, req.user.id]
@@ -46,13 +48,14 @@ router.put('/:id', puedeEditar, async (req, res) => {
   const b = req.body || {};
   if (b.tipo && !TIPOS.includes(b.tipo)) return res.status(400).json({ error: 'Tipo inválido' });
   if (b.estado && !ESTADOS.includes(b.estado)) return res.status(400).json({ error: 'Estado inválido' });
+  if (b.modalidad && !MODALIDADES.includes(b.modalidad)) return res.status(400).json({ error: 'Modalidad inválida' });
   const { rows } = await query(
     `UPDATE cheques SET
-       tipo = COALESCE($1, tipo), numero = $2, banco = $3,
-       importe = COALESCE($4, importe), fecha_emision = $5, fecha_cobro = $6,
-       estado = COALESCE($7, estado), relacionado = $8, trabajo_id = $9
-     WHERE id = $10 RETURNING *`,
-    [b.tipo ?? null, b.numero ?? null, b.banco ?? null, b.importe ?? null,
+       tipo = COALESCE($1, tipo), modalidad = COALESCE($2, modalidad), numero = $3, banco = $4,
+       importe = COALESCE($5, importe), fecha_emision = $6, fecha_cobro = $7,
+       estado = COALESCE($8, estado), relacionado = $9, trabajo_id = $10
+     WHERE id = $11 RETURNING *`,
+    [b.tipo ?? null, b.modalidad ?? null, b.numero ?? null, b.banco ?? null, b.importe ?? null,
      b.fecha_emision || null, b.fecha_cobro || null, b.estado ?? null,
      b.relacionado ?? null, b.trabajo_id || null, req.params.id]
   );
