@@ -195,7 +195,7 @@ async function vistaDashboard() {
 
 function tablaSimple(filas, _c, rowFn, headers) {
   if (!filas || !filas.length) return '<p>Nada por ahora.</p>';
-  return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${filas.map(rowFn).join('')}</tbody></table>`;
+  return `<div class="tabla-scroll"><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${filas.map(rowFn).join('')}</tbody></table></div>`;
 }
 
 // ---------- Trabajos ----------

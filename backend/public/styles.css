@@ -116,6 +116,11 @@ th {
   border-bottom: 1px solid var(--ga-contorno); white-space: nowrap;
 }
 td { padding: 11px 14px; border-bottom: 1px solid var(--ga-linea); vertical-align: middle; }
+/* Las tablas anchas scrollean dentro de su contenedor: nunca empujan la página */
+#lista-trabajos, #lista-cheques, #lista-pagos, #lista-compras, #lista-usuarios,
+#lista-bandeja, #lista-empresas, #lista-contactos, .tabla-scroll {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: var(--ga-superficie); }
 .acciones { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -160,7 +165,8 @@ tbody tr:hover td { background: var(--ga-superficie); }
 }
 .modal h3 { margin: 0 0 var(--ga-sp-2); padding-bottom: var(--ga-sp-1); font: var(--ga-h3); border-bottom: 1px solid var(--ga-linea); }
 .modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ga-sp-2); }
-.modal label { display: flex; flex-direction: column; gap: 5px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); }
+.modal label { display: flex; flex-direction: column; gap: 5px; font: var(--ga-label); letter-spacing: .08em; text-transform: uppercase; color: var(--ga-texto-2); min-width: 0; }
+.modal input, .modal select, .modal textarea { min-width: 0; }
 /* .full ocupa las dos columnas — vale para labels Y para bloques como la galería de fotos */
 .modal .grid .full, .modal label.full { grid-column: 1 / -1; }
 .modal .acciones { margin-top: var(--ga-sp-3); justify-content: flex-end; }
