@@ -379,14 +379,14 @@ async function nudgeTexto() {
 
 // ---- Imágenes / adjuntos que llegan por WhatsApp ----
 async function bajarImagenWaha(mediaUrl) {
-  // La URL que da WAHA apunta a su propio host; la reescribimos para alcanzarlo desde el contenedor.
-  let url = mediaUrl;
-  try {
-    const u = new URL(mediaUrl);
-    const base = new URL(WAHA_URL);
-    u.protocol = base.protocol; u.host = base.host;
-    url = u.toString();
-  } catch { /* si no es URL válida, se usa tal cual */ }
+  // La URL que da WAHA apunta a su propio host (localhost:3000). Reescribimos SOLO el scheme+host
+  // para alcanzar WAHA desde el contenedor, con un reemplazo de texto (no rompe si WAHA_URL es rara).
+  let base = (WAHA_URL || '').trim();
+  if (base && !/^https?:\/\//i.test(base)) base = 'http://' + base;
+  // localhost/127.0.0.1 adentro del contenedor NO es WAHA (es la app): forzar host-gateway.
+  if (!base || /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(base)) base = 'http://host.docker.internal:3001';
+  base = base.replace(/\/+$/, '');
+  const url = mediaUrl.replace(/^https?:\/\/[^/]+/i, base);
   // Reintenta: WAHA puede tardar ~1s en terminar de guardar el archivo tras avisar por webhook.
   let ultimo = 0;
   for (let intento = 0; intento < 6; intento++) {
