@@ -14,15 +14,60 @@ const LBL_ESTADO = { cotizar: 'por cotizar', presupuestado: 'presupuestado', ped
 const AUTORIZADOS = (process.env.AUTORIZADOS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
 
-async function ollamaJSON(prompt) {
+// Esquemas JSON: obligan a qwen3 a LLENAR los campos (con format:"json" a secas
+// devuelve {} vacío). Los campos nullable usan type ["...","null"] y van en required
+// para forzar que el modelo los emita siempre (aunque sea null).
+const NUL = (t) => ({ type: [t, 'null'] });
+const SCHEMA = {
+  clasificar: {
+    type: 'object',
+    properties: {
+      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar'] },
+      id: NUL('integer'), empresa: NUL('string'), contacto: NUL('string'),
+      descripcion: NUL('string'), disciplina: NUL('string'), precio: NUL('integer'),
+    },
+    required: ['intencion'],
+  },
+  actualizar: {
+    type: 'object',
+    properties: {
+      ref_id: NUL('integer'), ref_n: NUL('integer'), ref_cliente: NUL('string'),
+      estado: NUL('string'), pagado: NUL('boolean'), facturado: NUL('boolean'),
+      precio: NUL('integer'), disciplina: NUL('string'),
+    },
+    required: ['ref_id', 'ref_n', 'ref_cliente', 'estado', 'pagado', 'facturado', 'precio', 'disciplina'],
+  },
+  consulta: {
+    type: 'object',
+    properties: {
+      tipo: { type: 'string', enum: ['facturado_cliente', 'por_cobrar', 'ventas_periodo', 'trabajos_cliente'] },
+      cliente: NUL('string'), periodo: NUL('string'),
+    },
+    required: ['tipo'],
+  },
+  eligiendo: {
+    type: 'object',
+    properties: {
+      n: NUL('integer'), finalizado: NUL('boolean'), pagado: NUL('boolean'), facturado: NUL('boolean'),
+    },
+    required: ['n', 'finalizado', 'pagado', 'facturado'],
+  },
+};
+
+async function ollamaJSON(prompt, schema) {
   try {
     const r = await fetch(OLLAMA_URL + '/api/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, format: 'json', options: { temperature: 0 } }),
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, think: false, format: schema || 'json', options: { temperature: 0 } }),
     });
     const j = await r.json();
-    return JSON.parse(j.response || '{}');
-  } catch (e) { console.error('ollama:', e.message); return {}; }
+    if (!j || typeof j.response !== 'string' || !j.response.trim()) {
+      // Ollama respondió pero sin texto útil (p. ej. {"error":"model ... not found"}).
+      console.error('ollama sin response (modelo=' + OLLAMA_MODEL + '):', JSON.stringify(j).slice(0, 300));
+      return {};
+    }
+    return JSON.parse(j.response);
+  } catch (e) { console.error('ollama fetch/parse:', e.message); return {}; }
 }
 
 async function getCtx(chatId) {
@@ -222,7 +267,7 @@ router.post('/mensaje', async (req, res) => {
   if (ctx.estado === 'eligiendo') {
     const lista = (ctx.datos && ctx.datos.lista) || [];
     const listaTxt = lista.map((x) => `${x.n}) #${x.id} ${x.cliente} ${x.descripcion || ''}`).join('; ');
-    const d = await ollamaJSON(`Trabajos: ${listaTxt}.\nEl usuario dijo: "${texto}".\nDevolvé SOLO JSON: n (número de la lista o null), finalizado (true/null), pagado (true/false/null), facturado (true/false/null).`);
+    const d = await ollamaJSON(`Trabajos: ${listaTxt}.\nEl usuario dijo: "${texto}".\nDevolvé SOLO JSON: n (número de la lista o null), finalizado (true/null), pagado (true/false/null), facturado (true/false/null).`, SCHEMA.eligiendo);
     const item = lista.find((x) => x.n == d.n);
     if (!item) return res.json({ reply: 'No entendí a cuál. Decime el número, ej: "el 1 se terminó". (o "menu")' });
     await aplicar(item.id, { finalizado: d.finalizado === true, pagado: d.pagado, facturado: d.facturado });
@@ -250,7 +295,7 @@ router.post('/mensaje', async (req, res) => {
 
   // Router con contexto
   const ctxNegocio = await contextoClientes();
-  const d = await ollamaJSON(promptClasificar(texto, ctxNegocio));
+  const d = await ollamaJSON(promptClasificar(texto, ctxNegocio), SCHEMA.clasificar);
   if (!d || Object.keys(d).length === 0) return res.json({ reply: '🤖 Uy, no te pude procesar (la IA no respondió). ¿Me lo repetís?' });
   const intent = d.intencion || 'nuevo_trabajo';
   const idMenc = d.id || (texto.match(/#?(\d{1,6})/) ? Number(texto.match(/#?(\d{1,6})/)[1]) : null);
@@ -266,14 +311,14 @@ router.post('/mensaje', async (req, res) => {
   }
 
   if (intent === 'consulta') {
-    const q = await ollamaJSON(promptConsulta(texto));
+    const q = await ollamaJSON(promptConsulta(texto), SCHEMA.consulta);
     return res.json({ reply: await responderConsulta(q) });
   }
 
   if (intent === 'actualizar_trabajo') {
     const lista = (ctx.datos && ctx.datos.lista) || [];
     const listaTxt = lista.map((x) => `${x.n}) #${x.id} ${x.cliente}`).join('; ');
-    const u = await ollamaJSON(promptActualizar(texto, listaTxt));
+    const u = await ollamaJSON(promptActualizar(texto, listaTxt), SCHEMA.actualizar);
     const ref = await resolverRef(u, ctx);
     if (ref.multiple) return res.json({ reply: `Hay varios de "${u.ref_cliente}": ${ref.multiple.map((x) => '#' + x).join(', ')}. ¿Cuál? Decime el #número.` });
     if (!ref.id) return res.json({ reply: 'No supe a qué trabajo te referís. Decime el #número o el nombre del cliente.' });
