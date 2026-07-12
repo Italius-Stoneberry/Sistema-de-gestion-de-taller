@@ -44,7 +44,9 @@
             }
           ]
         },
-        "options": {},
+        "options": {
+          "timeout": 180000
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ from: $json.from, texto: $json.texto, media_url: $json.media_url, mimetype: $json.mimetype }) }}"
@@ -102,7 +104,9 @@
             }
           ]
         },
-        "options": {},
+        "options": {
+          "timeout": 30000
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ session: \"default\", chatId: $(\"Extraer\").first().json.chatId, text: $json.reply }) }}"

@@ -117,10 +117,14 @@ const SCHEMA = {
   },
 };
 
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS) || 120000;
 async function ollamaJSON(prompt, schema) {
   try {
+    // Timeout generoso: el primer mensaje tras un rato de inactividad paga la carga
+    // del modelo a la GPU (30-60s). Pasado el límite, cortamos y avisamos.
     const r = await fetch(OLLAMA_URL + '/api/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
       body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, think: false, keep_alive: OLLAMA_KEEP_ALIVE, format: schema || 'json', options: { temperature: 0 } }),
     });
     const j = await r.json();
@@ -733,6 +737,15 @@ router.post('/mensaje', async (req, res) => {
   if (esOpcion(1)) return res.json({ reply: await listarActivos(from) });
   if (esOpcion(2)) return res.json({ reply: await listarBandeja() });
   if (esOpcion(3)) return res.json({ reply: await listarSinPresup() });
+
+  // Atajos directos sin pasar por la IA: responden al instante aunque el modelo
+  // esté descargado de la GPU (arranque en frío) y nunca se clasifican mal.
+  if (/^(ver\s+)?(los\s+)?trabajos(\s+(en\s+curso|activos|pendientes))?\s*\??$/i.test(t) || t === 'activos') return res.json({ reply: await listarActivos(from) });
+  if (/^(ver\s+)?(la\s+)?bandeja\s*\??$/i.test(t)) return res.json({ reply: await listarBandeja() });
+  if (/^(ver\s+)?(los\s+)?cheques(\s+pendientes)?\s*\??$/i.test(t)) return res.json({ reply: await listarCheques(null) });
+  if (/^(ver\s+)?(los\s+)?pagos(\s+pendientes)?\s*\??$/i.test(t)) return res.json({ reply: await listarPagos() });
+  if (/^(ver\s+)?(la\s+)?(lista(\s+de\s+compras)?|compras)\s*\??$/i.test(t)) return res.json({ reply: await listarCompras() });
+  if (/^(ver\s+)?sin\s+presupuestar\s*\??$/i.test(t)) return res.json({ reply: await listarSinPresup() });
 
   // Router con contexto
   const ctxNegocio = await contextoClientes();
