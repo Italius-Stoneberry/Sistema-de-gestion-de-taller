@@ -14,6 +14,8 @@ const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, (c) => ({ '&':
 const puedeEditar = () => USER && (USER.rol === 'admin' || USER.rol === 'gestor');
 const esAdmin = () => USER && USER.rol === 'admin';
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 });
+const IVA = 1.21; // alícuota general — el precio con IVA se calcula al vuelo, nunca se guarda
+const conIVA = (n) => money(Number(n || 0) * IVA);
 const fecha = (d) => (d ? String(d).slice(0, 10) : '');
 // Para MOSTRAR en pantalla: DD/MM/AAAA (los <input type="date"> siguen usando fecha()).
 const fechaAR = (d) => { const s = fecha(d); const p = s.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s; };
@@ -233,7 +235,7 @@ async function cargarTrabajos() {
   $('#lista-trabajos').innerHTML = filas.length ? `
     <table><thead><tr>
       <th>Cliente</th><th>Descripción</th><th>Disciplina</th><th>Estado</th>
-      <th>Cobro</th><th>Facturación</th><th>Precio</th><th>Ingreso</th><th></th>
+      <th>Cobro</th><th>Facturación</th><th>Precio</th><th>Precio c/IVA</th><th>Ingreso</th><th></th>
     </tr></thead><tbody>
     ${filas.map((t) => `<tr>
       <td>${esc(t.contacto_nombre || t.cliente)}${t.empresa_nombre ? ` <small style="color:var(--ga-texto-2)">(${esc(t.empresa_nombre)})</small>` : ''}${t.origen === 'ia' && !t.revisado ? ' <em>(IA sin revisar)</em>' : ''}</td>
@@ -243,6 +245,7 @@ async function cargarTrabajos() {
       <td><span class="clic" data-cobro="${t.id}" title="Marcar cobro">${t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')}</span></td>
       <td><span class="clic" data-fact="${t.id}" title="Marcar facturación">${t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')}</span></td>
       <td>${money(t.precio)}</td>
+      <td>${conIVA(t.precio)}</td>
       <td>${fechaAR(t.fecha_ingreso)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${t.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${t.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}
@@ -279,6 +282,7 @@ function formTrabajo(t, onDone) {
       <label class="full">Descripción <textarea name="descripcion">${esc(t.descripcion)}</textarea></label>
       <label>Estado <select name="estado">${opts(LBL.estado, t.estado)}</select></label>
       <label>Precio <input name="precio" type="number" step="0.01" value="${t.precio ?? ''}" /></label>
+      <label>Precio c/IVA (21%) <input id="precio-iva" disabled value="${conIVA(t.precio)}" /></label>
       <label>Cobro <select name="pagado"><option value="false">No pagado</option><option value="true" ${t.pagado ? 'selected' : ''}>Pagado</option></select></label>
       <label>Facturación <select name="facturado"><option value="false">No facturado</option><option value="true" ${t.facturado ? 'selected' : ''}>Facturado</option></select></label>
       <label>Entrega estimada <input name="fecha_entrega_estimada" type="date" value="${fecha(t.fecha_entrega_estimada)}" /></label>
@@ -300,6 +304,9 @@ function formTrabajo(t, onDone) {
     cerrarModal(); (onDone || cargarTrabajos)();
   });
   poblarDatalistsCliente();
+  const fPrecio = document.querySelector('#modal-fondo [name="precio"]');
+  const fIva = document.querySelector('#modal-fondo #precio-iva');
+  if (fPrecio && fIva) fPrecio.addEventListener('input', () => { fIva.value = conIVA(fPrecio.value); });
   if (t.id) cargarGaleria('trabajo', t.id);
 }
 
