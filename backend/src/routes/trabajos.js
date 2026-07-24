@@ -8,6 +8,17 @@ import { borrarAdjuntosDe } from './adjuntos.js';
 const router = Router();
 router.use(requiereAuth);
 
+// Si vienen cantidad y precio unitario, el precio total se calcula ACÁ (el servidor manda):
+// nunca puede quedar guardado un total inconsistente con el desglose.
+function normalizarPrecio(b) {
+  const num = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+  const cantidad = num(b.cantidad);
+  const unitario = num(b.precio_unitario);
+  let precio = num(b.precio);
+  if (cantidad > 0 && unitario > 0) precio = Math.round(cantidad * unitario * 100) / 100;
+  return { cantidad, unitario, precio };
+}
+
 // Resuelve empresa y contacto a partir de ids o nombres (los crea si no existen).
 async function resolverCliente(b, origen = 'manual') {
   let empresaId = null;
@@ -73,15 +84,16 @@ router.post('/', puedeEditar, async (req, res) => {
   const clienteTxt = (b.cliente || b.contacto_nombre || b.empresa_nombre || '').trim();
   if (!clienteTxt) return res.status(400).json({ error: 'Falta el cliente o contacto' });
 
+  const { cantidad, unitario, precio } = normalizarPrecio(b);
   const { rows } = await query(
     `INSERT INTO trabajos
       (cliente, contacto, empresa_id, contacto_id, descripcion, disciplina, estado, pagado, facturado,
-       precio, fecha_entrega_estimada, responsable, notas, creado_por)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       precio, cantidad, precio_unitario, fecha_entrega_estimada, responsable, notas, creado_por)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING *`,
     [clienteTxt, b.contacto || null, empresaId, contactoId, b.descripcion || null, b.disciplina,
      ESTADOS.includes(b.estado) ? b.estado : 'pedido',
-     !!b.pagado, !!b.facturado, b.precio || 0,
+     !!b.pagado, !!b.facturado, precio || 0, cantidad, unitario,
      b.fecha_entrega_estimada || null, b.responsable || null, b.notas || null, req.user.id]
   );
   await audit(req.user.id, 'crear', 'trabajo', rows[0].id, { cliente: clienteTxt });
@@ -96,6 +108,7 @@ router.put('/:id', puedeEditar, async (req, res) => {
 
   const { empresaId, contactoId } = await resolverCliente(b);
 
+  const { cantidad, unitario, precio } = normalizarPrecio(b);
   const { rows } = await query(
     `UPDATE trabajos SET
        cliente = COALESCE($1, cliente),
@@ -108,15 +121,18 @@ router.put('/:id', puedeEditar, async (req, res) => {
        pagado = COALESCE($8, pagado),
        facturado = COALESCE($9, facturado),
        precio = COALESCE($10, precio),
-       fecha_entrega_estimada = $11,
-       fecha_entrega_real = $12,
-       responsable = $13,
-       notas = $14,
+       cantidad = $11,
+       precio_unitario = $12,
+       fecha_entrega_estimada = $13,
+       fecha_entrega_real = $14,
+       responsable = $15,
+       notas = $16,
        actualizado_en = now()
-     WHERE id = $15 RETURNING *`,
+     WHERE id = $17 RETURNING *`,
     [b.cliente ?? null, b.contacto ?? null, empresaId, contactoId, b.descripcion ?? null, b.disciplina ?? null,
      b.estado ?? null, (b.pagado === undefined ? null : !!b.pagado),
-     (b.facturado === undefined ? null : !!b.facturado), b.precio ?? null,
+     (b.facturado === undefined ? null : !!b.facturado), precio,
+     cantidad, unitario,
      b.fecha_entrega_estimada || null, b.fecha_entrega_real || null,
      b.responsable ?? null, b.notas ?? null, req.params.id]
   );

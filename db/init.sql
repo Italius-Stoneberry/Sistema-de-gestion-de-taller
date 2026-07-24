@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS trabajos (
   pagado                 BOOLEAN NOT NULL DEFAULT FALSE,
   facturado              BOOLEAN NOT NULL DEFAULT FALSE,
   precio                 NUMERIC(12,2) DEFAULT 0,
+  cantidad               NUMERIC(12,2),
+  precio_unitario        NUMERIC(12,2),
   fecha_ingreso          DATE NOT NULL DEFAULT CURRENT_DATE,
   fecha_entrega_estimada DATE,
   fecha_entrega_real     DATE,

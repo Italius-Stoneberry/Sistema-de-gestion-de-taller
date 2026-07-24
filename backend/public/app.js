@@ -244,7 +244,7 @@ async function cargarTrabajos() {
       <td><span class="clic" data-adv="${t.id}" title="Avanzar estado">${badgeEstado(t.estado)} <b class="adv">▸</b></span></td>
       <td><span class="clic" data-cobro="${t.id}" title="Marcar cobro">${t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')}</span></td>
       <td><span class="clic" data-fact="${t.id}" title="Marcar facturación">${t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')}</span></td>
-      <td>${money(t.precio)}</td>
+      <td>${money(t.precio)}${t.cantidad > 0 && t.precio_unitario > 0 ? `<br><small style="color:var(--ga-texto-2)">${Number(t.cantidad)} × ${money(t.precio_unitario)}</small>` : ''}</td>
       <td>${conIVA(t.precio)}</td>
       <td>${fechaAR(t.fecha_ingreso)}</td>
       <td class="acciones">${puedeEditar() ? `<button data-edit="${t.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${t.id}" class="btn-danger">Eliminar</button>` : ''}</td>
@@ -281,7 +281,9 @@ function formTrabajo(t, onDone) {
       <label>Disciplina <select name="disciplina">${opts(LBL.disciplina, t.disciplina)}</select></label>
       <label class="full">Descripción <textarea name="descripcion">${esc(t.descripcion)}</textarea></label>
       <label>Estado <select name="estado">${opts(LBL.estado, t.estado)}</select></label>
-      <label>Precio <input name="precio" type="number" step="0.01" value="${t.precio ?? ''}" /></label>
+      <label>Cantidad <input name="cantidad" type="number" step="1" min="0" value="${t.cantidad ? Number(t.cantidad) : ''}" placeholder="ej: 100" /></label>
+      <label>Precio unitario <input name="precio_unitario" type="number" step="0.01" value="${t.precio_unitario ? Number(t.precio_unitario) : ''}" placeholder="por unidad" /></label>
+      <label>Precio (total) <input name="precio" type="number" step="0.01" value="${t.precio ?? ''}" /></label>
       <label>Precio c/IVA (21%) <input id="precio-iva" disabled value="${conIVA(t.precio)}" /></label>
       <label>Cobro <select name="pagado"><option value="false">No pagado</option><option value="true" ${t.pagado ? 'selected' : ''}>Pagado</option></select></label>
       <label>Facturación <select name="facturado"><option value="false">No facturado</option><option value="true" ${t.facturado ? 'selected' : ''}>Facturado</option></select></label>
@@ -295,6 +297,7 @@ function formTrabajo(t, onDone) {
       empresa_nombre: f.empresa_nombre.value, contacto_nombre: f.contacto_nombre.value,
       descripcion: f.descripcion.value,
       disciplina: f.disciplina.value, estado: f.estado.value, precio: Number(f.precio.value || 0),
+      cantidad: f.cantidad.value || null, precio_unitario: f.precio_unitario.value || null,
       pagado: f.pagado.value === 'true', facturado: f.facturado.value === 'true',
       fecha_entrega_estimada: f.fecha_entrega_estimada.value || null,
       responsable: f.responsable.value, notas: f.notas.value,
@@ -304,9 +307,21 @@ function formTrabajo(t, onDone) {
     cerrarModal(); (onDone || cargarTrabajos)();
   });
   poblarDatalistsCliente();
-  const fPrecio = document.querySelector('#modal-fondo [name="precio"]');
-  const fIva = document.querySelector('#modal-fondo #precio-iva');
-  if (fPrecio && fIva) fPrecio.addEventListener('input', () => { fIva.value = conIVA(fPrecio.value); });
+  const $m = (sel) => document.querySelector('#modal-fondo ' + sel);
+  const fCant = $m('[name="cantidad"]'), fUnit = $m('[name="precio_unitario"]'), fPrecio = $m('[name="precio"]'), fIva = $m('#precio-iva');
+  const recalc = () => {
+    const c = Number(fCant.value || 0), u = Number(fUnit.value || 0);
+    if (c > 0 && u > 0) {
+      fPrecio.value = Math.round(c * u * 100) / 100;
+      fPrecio.readOnly = true; fPrecio.style.background = 'var(--ga-panel)';
+      fPrecio.title = 'Se calcula solo: cantidad × precio unitario';
+    } else {
+      fPrecio.readOnly = false; fPrecio.style.background = ''; fPrecio.title = '';
+    }
+    if (fIva) fIva.value = conIVA(fPrecio.value);
+  };
+  [fCant, fUnit, fPrecio].forEach((el) => el && el.addEventListener('input', recalc));
+  recalc();
   if (t.id) cargarGaleria('trabajo', t.id);
 }
 
