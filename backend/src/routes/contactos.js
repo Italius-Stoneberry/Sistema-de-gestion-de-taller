@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereAuth, puedeEditar, soloAdmin } from '../auth.js';
+import { normalizarNombre } from '../resolvers.js';
 
 const router = Router();
 router.use(requiereAuth);
@@ -30,7 +31,7 @@ router.post('/', puedeEditar, async (req, res) => {
   if (!b.nombre) return res.status(400).json({ error: 'Falta el nombre del contacto' });
   const { rows } = await query(
     `INSERT INTO contactos (nombre, empresa_id, telefono, notas) VALUES ($1,$2,$3,$4) RETURNING *`,
-    [b.nombre.trim(), b.empresa_id || null, b.telefono || null, b.notas || null]
+    [normalizarNombre(b.nombre), b.empresa_id || null, b.telefono || null, b.notas || null]
   );
   await audit(req.user.id, 'crear', 'contacto', rows[0].id, { nombre: b.nombre });
   res.status(201).json(rows[0]);
@@ -43,7 +44,7 @@ router.put('/:id', puedeEditar, async (req, res) => {
        nombre = COALESCE($1, nombre),
        empresa_id = $2, telefono = $3, notas = $4
      WHERE id = $5 RETURNING *`,
-    [b.nombre ?? null, b.empresa_id || null, b.telefono ?? null, b.notas ?? null, req.params.id]
+    [b.nombre ? normalizarNombre(b.nombre) : null, b.empresa_id || null, b.telefono ?? null, b.notas ?? null, req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
   await audit(req.user.id, 'editar', 'contacto', rows[0].id, null);

@@ -232,6 +232,13 @@ async function cargarTrabajos() {
   if (g('f-facturado')) qs.set('facturado', g('f-facturado'));
   if (g('f-buscar')) qs.set('buscar', g('f-buscar'));
   const filas = await api('GET', '/trabajos?' + qs.toString());
+  renderTrabajos(filas);
+}
+
+// Renderiza la lista EN EL ORDEN RECIBIDO. Los cambios rápidos (estado/cobro/facturación)
+// editan la fila en su lugar y re-renderizan este mismo array: nada salta de posición.
+// El orden por estado se aplica recién al recargar la vista o cambiar un filtro.
+function renderTrabajos(filas) {
   $('#lista-trabajos').innerHTML = filas.length ? `
     <table><thead><tr>
       <th>Cliente</th><th>Descripción</th><th>Disciplina</th><th>Estado</th>
@@ -251,12 +258,31 @@ async function cargarTrabajos() {
     </tr>`).join('')}
     </tbody></table>` : '<p>No hay trabajos con esos filtros.</p>';
 
-  $('#lista-trabajos').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formTrabajo(filas.find((t) => t.id == b.dataset.edit)));
+  $('#lista-trabajos').querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => {
+    const t = filas.find((x) => x.id == b.dataset.edit);
+    // Al guardar desde el modal, refresca la fila en su lugar (sin reordenar)
+    formTrabajo(t, async () => {
+      try {
+        const act = await api('GET', '/trabajos/' + t.id);
+        const i = filas.findIndex((x) => x.id == t.id);
+        if (i >= 0) filas[i] = act;
+        renderTrabajos(filas);
+      } catch { cargarTrabajos(); }
+    });
+  });
   $('#lista-trabajos').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (confirm('¿Eliminar este trabajo?')) { await api('DELETE', '/trabajos/' + b.dataset.del); cargarTrabajos(); }
   });
 
-  const rapido = async (id, campos) => { try { await api('PATCH', '/trabajos/' + id + '/rapido', campos); cargarTrabajos(); } catch (e) { toast(e.message, 'error'); } };
+  const rapido = async (id, campos) => {
+    try {
+      const act = await api('PATCH', '/trabajos/' + id + '/rapido', campos);
+      const i = filas.findIndex((x) => x.id == id);
+      // Merge: la respuesta trae la fila actualizada; conservamos empresa/contacto del join.
+      if (i >= 0) filas[i] = { ...filas[i], ...act };
+      renderTrabajos(filas);
+    } catch (e) { toast(e.message, 'error'); }
+  };
   $('#lista-trabajos').querySelectorAll('[data-adv]').forEach((b) => b.onclick = () => {
     const t = filas.find((x) => x.id == b.dataset.adv);
     const sig = AVANCE[t.estado] || t.estado;
@@ -643,6 +669,7 @@ async function vistaClientes() {
     <div class="filtros">
       ${puedeEditar() ? '<button id="btn-nueva-empresa" class="btn-primary">+ Nueva empresa</button>' : ''}
       ${puedeEditar() ? '<button id="btn-nuevo-contacto" class="btn-primary">+ Nuevo contacto</button>' : ''}
+      ${esAdmin() ? '<button id="btn-unificar" title="Une empresas y contactos con el mismo nombre y normaliza mayúsculas">🧹 Unificar duplicados</button>' : ''}
     </div>
     <h3>Empresas</h3><div id="lista-empresas">Cargando...</div>
     <h3>Contactos</h3><div id="lista-contactos">Cargando...</div>`;
@@ -650,6 +677,12 @@ async function vistaClientes() {
     $('#btn-nueva-empresa').addEventListener('click', () => formEmpresa());
     $('#btn-nuevo-contacto').addEventListener('click', () => formContacto());
   }
+  if (esAdmin()) $('#btn-unificar').addEventListener('click', async () => {
+    if (!confirm('Une empresas y contactos duplicados (mismo nombre) y normaliza la escritura.\nDos contactos iguales con empresas distintas NO se tocan. ¿Continuar?')) return;
+    const r = await api('POST', '/clientes/unificar');
+    toast(`Listo: ${r.contactos} contacto(s) y ${r.empresas} empresa(s) unificados`);
+    cargarEmpresas(); cargarContactos();
+  });
   cargarEmpresas(); cargarContactos();
 }
 

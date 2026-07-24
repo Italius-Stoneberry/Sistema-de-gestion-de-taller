@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, audit } from '../db.js';
 import { requiereAuth, puedeEditar, soloAdmin } from '../auth.js';
+import { normalizarNombre } from '../resolvers.js';
 
 const router = Router();
 router.use(requiereAuth);
@@ -28,7 +29,7 @@ router.post('/', puedeEditar, async (req, res) => {
   const cond = b.condicion_pago === 'diferido' ? 'diferido' : 'contado';
   const { rows } = await query(
     `INSERT INTO empresas (nombre, condicion_pago, telefono, notas) VALUES ($1,$2,$3,$4) RETURNING *`,
-    [b.nombre.trim(), cond, b.telefono || null, b.notas || null]
+    [normalizarNombre(b.nombre), cond, b.telefono || null, b.notas || null]
   );
   await audit(req.user.id, 'crear', 'empresa', rows[0].id, { nombre: b.nombre });
   res.status(201).json(rows[0]);
@@ -43,7 +44,7 @@ router.put('/:id', puedeEditar, async (req, res) => {
        condicion_pago = COALESCE($2, condicion_pago),
        telefono = $3, notas = $4
      WHERE id = $5 RETURNING *`,
-    [b.nombre ?? null, cond, b.telefono ?? null, b.notas ?? null, req.params.id]
+    [b.nombre ? normalizarNombre(b.nombre) : null, cond, b.telefono ?? null, b.notas ?? null, req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: 'No encontrada' });
   await audit(req.user.id, 'editar', 'empresa', rows[0].id, null);
