@@ -27,6 +27,8 @@ const LBL = {
   cheque_modalidad: { fisico: 'Físico', electronico: 'E-check' },
   cheque_estado: { pendiente: 'Pendiente', cobrado: 'Cobrado', depositado: 'Depositado', rechazado: 'Rechazado' },
   pago_estado: { pendiente: 'Pendiente', pagado: 'Pagado' },
+  rubro_precio: { serigrafia: 'Serigrafía', laser: 'Grabado láser (CO2/fibra)', impresion: 'Impresión', ploteo: 'Cartelería / Ploteo', diseno: 'Diseño' },
+  modo_precio: { por_cantidad: 'Por cantidad', por_m2: 'Por m²', por_hora: 'Por hora' },
 };
 
 // Badges de estado con la paleta de marca (dorado=activo, negro=ok, rojo=alerta, gris=neutro)
@@ -130,6 +132,7 @@ const VISTAS = [
   { id: 'cheques', nombre: 'Cheques', render: vistaCheques },
   { id: 'pagos', nombre: 'Pagos de servicios', render: vistaPagos },
   { id: 'compras', nombre: 'Compras', render: vistaCompras },
+  { id: 'precios', nombre: 'Precios', render: vistaPrecios },
   { id: 'clientes', nombre: 'Clientes', render: vistaClientes },
   { id: 'bandeja', nombre: 'Bandeja', render: vistaBandeja },
   { id: 'usuarios', nombre: 'Usuarios', render: vistaUsuarios, soloAdmin: true },
@@ -651,6 +654,159 @@ async function refrescarBadgeBandeja(total) {
 }
 // Refresco automático: si entra algo por WhatsApp mientras la pestaña está abierta, se nota.
 setInterval(() => { if (TOKEN && USER) refrescarBadgeBandeja(); }, 60000);
+
+// ---------- Lista de precios + calculadora de presupuestos ----------
+// Precio unitario según cantidad: usa la escala más alta que la cantidad alcanza
+// (149 unidades → precio de 100). Si esa escala no está cargada, cae a la más cercana.
+function precioUnitarioPara(item, cant) {
+  const escalas = [[500, item.p500], [250, item.p250], [100, item.p100], [50, item.p50]]
+    .filter(([, v]) => v != null && Number(v) > 0);
+  if (!escalas.length) return null;
+  const alcanzada = escalas.find(([min]) => cant >= min);
+  return Number((alcanzada || escalas[escalas.length - 1])[1]);
+}
+
+async function vistaPrecios() {
+  $('#contenido').innerHTML = `
+    <h2>Precios y presupuestos</h2>
+    <div class="filtros" id="calc-panel">
+      <label style="min-width:220px">Ítem <select id="calc-item"></select></label>
+      <label id="calc-l-cant">Cantidad <input id="calc-cant" type="number" min="1" value="100" /></label>
+      <label id="calc-l-m2" class="oculto">M² <input id="calc-m2" type="number" step="0.01" min="0" value="1" /></label>
+      <label>Horas de diseño <input id="calc-horas" type="number" step="0.5" min="0" value="0" /></label>
+      <div style="display:flex;flex-direction:column;gap:2px;font-size:.9rem" id="calc-out"></div>
+      ${puedeEditar() ? '<button id="calc-crear" class="btn-primary">Crear trabajo presupuestado</button>' : ''}
+    </div>
+    <div class="filtros">
+      ${puedeEditar() ? '<button id="btn-nuevo-precio" class="btn-primary">+ Nuevo ítem</button>' : ''}
+      <span style="font-size:.85rem;color:var(--ga-texto-2)">Por cantidad: precio POR UNIDAD en cada escala. La calculadora usa la escala alcanzada (149 u. paga precio de 100).</span>
+    </div>
+    <div id="lista-precios">Cargando...</div>`;
+  if (puedeEditar()) $('#btn-nuevo-precio').addEventListener('click', () => formPrecio());
+  cargarPrecios();
+}
+
+let PRECIOS = [];
+async function cargarPrecios() {
+  PRECIOS = await api('GET', '/precios');
+  const cont = $('#lista-precios');
+  const orden = ['serigrafia', 'laser', 'impresion', 'ploteo', 'diseno'];
+  let html = '';
+  for (const rubro of orden) {
+    const items = PRECIOS.filter((x) => x.rubro === rubro);
+    if (!items.length) continue;
+    html += `<h3>${LBL.rubro_precio[rubro]}</h3>
+      <table><thead><tr><th>Ítem</th><th>Modo</th><th>Costo</th><th>Precios de venta</th><th>Notas</th><th></th></tr></thead><tbody>
+      ${items.map((x) => `<tr>
+        <td>${esc(x.nombre)}</td>
+        <td>${LBL.modo_precio[x.modo] || x.modo}</td>
+        <td>${x.costo != null ? money(x.costo) : '—'}</td>
+        <td>${x.modo === 'por_cantidad'
+          ? [[50, x.p50], [100, x.p100], [250, x.p250], [500, x.p500]].filter(([, v]) => v != null).map(([n2, v]) => `×${n2}: <b>${money(v)}</b>/u`).join(' · ') || '—'
+          : x.precio != null ? `<b>${money(x.precio)}</b> ${x.modo === 'por_m2' ? '/m²' : '/hora'}` : '—'}</td>
+        <td>${esc(x.notas)}</td>
+        <td class="acciones">${puedeEditar() ? `<button data-edit="${x.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${x.id}" class="btn-danger">Eliminar</button>` : ''}</td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+  cont.innerHTML = html || '<p>Todavía no hay ítems. Cargá el primero con "+ Nuevo ítem".</p>';
+  cont.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => formPrecio(PRECIOS.find((x) => x.id == b.dataset.edit)));
+  cont.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (confirm('¿Eliminar este ítem de la lista de precios?')) { await api('DELETE', '/precios/' + b.dataset.del); cargarPrecios(); }
+  });
+  armarCalculadora();
+}
+
+function armarCalculadora() {
+  const sel = $('#calc-item');
+  if (!sel) return;
+  const cotizables = PRECIOS.filter((x) => x.modo !== 'por_hora');
+  sel.innerHTML = cotizables.length
+    ? cotizables.map((x) => `<option value="${x.id}">${LBL.rubro_precio[x.rubro]} — ${esc(x.nombre)}</option>`).join('')
+    : '<option value="">(cargá ítems primero)</option>';
+  const disenio = PRECIOS.find((x) => x.modo === 'por_hora');
+
+  const calc = () => {
+    const item = PRECIOS.find((x) => x.id == sel.value);
+    const out = $('#calc-out');
+    if (!item) { out.innerHTML = ''; return null; }
+    const esCant = item.modo === 'por_cantidad';
+    $('#calc-l-cant').classList.toggle('oculto', !esCant);
+    $('#calc-l-m2').classList.toggle('oculto', esCant);
+    const horas = Number($('#calc-horas').value || 0);
+    let sub = 0; let detalle = ''; let cant = null; let unit = null;
+    if (esCant) {
+      cant = Math.max(1, Number($('#calc-cant').value || 0));
+      unit = precioUnitarioPara(item, cant);
+      if (unit == null) { out.innerHTML = '<span style="color:var(--ga-rojo)">Este ítem no tiene escalas cargadas.</span>'; return null; }
+      sub = cant * unit;
+      detalle = `${cant} × ${money(unit)}`;
+    } else {
+      const m2 = Math.max(0, Number($('#calc-m2').value || 0));
+      if (item.precio == null) { out.innerHTML = '<span style="color:var(--ga-rojo)">Este ítem no tiene precio por m².</span>'; return null; }
+      sub = m2 * Number(item.precio);
+      detalle = `${m2} m² × ${money(item.precio)}`;
+    }
+    const tarifaDis = disenio ? Number(disenio.precio || 0) : 0;
+    const dis = horas * tarifaDis;
+    const total = sub + dis;
+    out.innerHTML = `<span>${detalle} = <b>${money(sub)}</b></span>`
+      + (horas > 0 ? `<span>Diseño: ${horas} h × ${money(tarifaDis)} = <b>${money(dis)}</b>${tarifaDis ? '' : ' ⚠️ tarifa de diseño en $0'}</span>` : '')
+      + `<span style="font-size:1.05rem">TOTAL: <b>${money(total)}</b> · c/IVA: <b>${conIVA(total)}</b></span>`;
+    return { item, cant, unit, horas, dis, total, detalle };
+  };
+
+  ['calc-item', 'calc-cant', 'calc-m2', 'calc-horas'].forEach((id) => {
+    const el = $('#' + id);
+    if (el) { el.addEventListener('input', calc); el.addEventListener('change', calc); }
+  });
+  calc();
+
+  const btn = $('#calc-crear');
+  if (btn) btn.onclick = () => {
+    const c = calc();
+    if (!c) return toast('Completá la calculadora primero', 'error');
+    const desc = `${c.item.nombre} — ${c.detalle}` + (c.horas > 0 ? ` + diseño ${c.horas}h` : '');
+    const disciplina = LBL.disciplina[c.item.rubro] ? c.item.rubro : 'impresion';
+    const pre = { estado: 'presupuestado', disciplina, descripcion: desc, precio: c.total };
+    // Solo si no hay diseño el desglose cantidad×unitario coincide con el total
+    if (c.cant && c.horas === 0) { pre.cantidad = c.cant; pre.precio_unitario = c.unit; }
+    formTrabajo(pre, () => toast('Trabajo presupuestado creado ✓'));
+  };
+}
+
+function formPrecio(x) {
+  x = x || {};
+  const opciones = (map, sel2) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${k === sel2 ? 'selected' : ''}>${v}</option>`).join('');
+  abrirModal(`${x.id ? 'Editar' : 'Nuevo'} ítem de precio`, `
+    <div class="grid">
+      <label>Rubro <select name="rubro">${opciones(LBL.rubro_precio, x.rubro || 'serigrafia')}</select></label>
+      <label>Modo <select name="modo">${opciones(LBL.modo_precio, x.modo || 'por_cantidad')}</select></label>
+      <label class="full">Nombre <input name="nombre" value="${esc(x.nombre)}" placeholder="Remeras 1 color / Grabado fibra / Ploteo vehicular" required /></label>
+      <label>Costo <input name="costo" type="number" step="0.01" value="${x.costo ?? ''}" placeholder="lo que te sale" /></label>
+      <label class="m-flat">Precio ($/m² o $/hora) <input name="precio" type="number" step="0.01" value="${x.precio ?? ''}" /></label>
+      <label class="m-cant">$/unidad ×50 <input name="p50" type="number" step="0.01" value="${x.p50 ?? ''}" /></label>
+      <label class="m-cant">$/unidad ×100 <input name="p100" type="number" step="0.01" value="${x.p100 ?? ''}" /></label>
+      <label class="m-cant">$/unidad ×250 <input name="p250" type="number" step="0.01" value="${x.p250 ?? ''}" /></label>
+      <label class="m-cant">$/unidad ×500 <input name="p500" type="number" step="0.01" value="${x.p500 ?? ''}" /></label>
+      <label class="full">Notas <textarea name="notas">${esc(x.notas)}</textarea></label>
+    </div>`, async (f) => {
+    const body = { rubro: f.rubro.value, modo: f.modo.value, nombre: f.nombre.value,
+      costo: f.costo.value || null, precio: f.precio.value || null,
+      p50: f.p50.value || null, p100: f.p100.value || null, p250: f.p250.value || null, p500: f.p500.value || null,
+      notas: f.notas.value };
+    if (x.id) await api('PUT', '/precios/' + x.id, body); else await api('POST', '/precios', body);
+    cerrarModal(); cargarPrecios();
+  });
+  // Mostrar solo los campos del modo elegido
+  const modoSel = document.querySelector('#modal-fondo [name="modo"]');
+  const ajustar = () => {
+    const esCant = modoSel.value === 'por_cantidad';
+    document.querySelectorAll('#modal-fondo .m-cant').forEach((el) => el.classList.toggle('oculto', !esCant));
+    document.querySelectorAll('#modal-fondo .m-flat').forEach((el) => el.classList.toggle('oculto', esCant));
+  };
+  modoSel.addEventListener('change', ajustar);
+  ajustar();
+}
 
 // ---------- Helpers de UI ----------
 // ---------- Clientes (empresas y contactos) ----------

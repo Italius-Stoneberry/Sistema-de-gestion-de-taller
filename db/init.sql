@@ -174,3 +174,24 @@ CREATE TABLE IF NOT EXISTS lista_compras (
   creado_en  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_compras_pendientes ON lista_compras(comprado);
+
+-- ========== LISTA DE PRECIOS (v1.9) ==========
+CREATE TABLE IF NOT EXISTS precios (
+  id             SERIAL PRIMARY KEY,
+  rubro          TEXT NOT NULL CHECK (rubro IN ('laser','serigrafia','ploteo','impresion','diseno')),
+  nombre         TEXT NOT NULL,
+  modo           TEXT NOT NULL CHECK (modo IN ('por_cantidad','por_m2','por_hora')),
+  costo          NUMERIC(12,2),
+  precio         NUMERIC(12,2),
+  p50            NUMERIC(12,2),
+  p100           NUMERIC(12,2),
+  p250           NUMERIC(12,2),
+  p500           NUMERIC(12,2),
+  notas          TEXT,
+  activo         BOOLEAN NOT NULL DEFAULT TRUE,
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_precios_rubro ON precios(rubro);
+INSERT INTO precios (rubro, nombre, modo, precio)
+SELECT 'diseno', 'Diseño', 'por_hora', 0
+WHERE NOT EXISTS (SELECT 1 FROM precios WHERE modo = 'por_hora');

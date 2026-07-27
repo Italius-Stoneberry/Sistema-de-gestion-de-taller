@@ -30,6 +30,7 @@ import contactosRoutes from './routes/contactos.js';
 import clientesRoutes from './routes/clientes.js';
 import comprasRoutes from './routes/compras.js';
 import adjuntosRoutes from './routes/adjuntos.js';
+import preciosRoutes from './routes/precios.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +57,7 @@ app.use('/api/contactos', contactosRoutes);
 app.use('/api/clientes', clientesRoutes);
 app.use('/api/compras', comprasRoutes);
 app.use('/api/adjuntos', adjuntosRoutes);
+app.use('/api/precios', preciosRoutes);
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // --- Frontend estático (sin diseño, para reemplazar más adelante) ---
