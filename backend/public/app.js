@@ -15,6 +15,18 @@ const puedeEditar = () => USER && (USER.rol === 'admin' || USER.rol === 'gestor'
 const esAdmin = () => USER && USER.rol === 'admin';
 const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 });
 const IVA = 1.21; // alícuota general — el precio con IVA se calcula al vuelo, nunca se guarda
+
+// ====== DATOS DEL TALLER (completar UNA vez: salen en los presupuestos) ======
+const DATOS_TALLER = {
+  nombre: 'GraficArte',
+  cuit: '23-21372397-9',            // CUIT
+  iibb: '108797',             // Ingresos Brutos
+  inicio: '08/2015',                // Inicio de actividades (MM/AAAA)
+  correo: 'graficarte@gmail.com',
+  instagram: '@graficarte_mdz',
+  whatsapp: '+54 9 261 580-8038',
+};
+// ============================================================================
 const conIVA = (n) => money(Number(n || 0) * IVA);
 const fecha = (d) => (d ? String(d).slice(0, 10) : '');
 // Para MOSTRAR en pantalla: DD/MM/AAAA (los <input type="date"> siguen usando fecha()).
@@ -96,7 +108,7 @@ new MutationObserver((muts) => {
 }).observe(document.body, { childList: true, subtree: true });
 
 // ---------- PWA: registrar el service worker (solo funciona con HTTPS o localhost) ----------
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => { });
 
 // ---------- Login / logout ----------
 $('#form-login').addEventListener('submit', async (e) => {
@@ -188,8 +200,8 @@ async function vistaDashboard() {
 
     <h3>Cheques próximos a vencer (15 días)</h3>
     ${tablaSimple(d.cheques_proximos, ['fecha_cobro', 'tipo', 'relacionado', 'importe'],
-      (c) => `<tr><td>${fechaAR(c.fecha_cobro)}</td><td>${LBL.cheque_tipo[c.tipo]}</td><td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td></tr>`,
-      ['Fecha', 'Tipo', 'Relacionado', 'Importe'])}
+    (c) => `<tr><td>${fechaAR(c.fecha_cobro)}</td><td>${LBL.cheque_tipo[c.tipo]}</td><td>${esc(c.relacionado)}</td><td>${money(c.importe)}</td></tr>`,
+    ['Fecha', 'Tipo', 'Relacionado', 'Importe'])}
 
     <h3>Pagos de servicios pendientes</h3>
     ${tablaSimple(d.pagos_pendientes, ['concepto'],
@@ -252,8 +264,8 @@ function renderTrabajos(filas) {
       <td>${esc(t.descripcion)}</td>
       <td>${LBL.disciplina[t.disciplina] || t.disciplina}</td>
       <td><span class="clic" data-adv="${t.id}" title="Avanzar estado">${badgeEstado(t.estado)} <b class="adv">▸</b></span></td>
-      <td><span class="clic" data-cobro="${t.id}" title="Marcar cobro">${t.pagado ? badge('Pagado','ok') : badge('No pagado','alerta')}</span></td>
-      <td><span class="clic" data-fact="${t.id}" title="Marcar facturación">${t.facturado ? badge('Facturado','ok') : badge('No facturado','neutro')}</span></td>
+      <td><span class="clic" data-cobro="${t.id}" title="Marcar cobro">${t.pagado ? badge('Pagado', 'ok') : badge('No pagado', 'alerta')}</span></td>
+      <td><span class="clic" data-fact="${t.id}" title="Marcar facturación">${t.facturado ? badge('Facturado', 'ok') : badge('No facturado', 'neutro')}</span></td>
       <td>${money(t.precio)}${t.cantidad > 0 && t.precio_unitario > 0 ? `<br><small style="color:var(--ga-texto-2)">${Number(t.cantidad)} × ${money(t.precio_unitario)}</small>` : ''}</td>
       <td>${conIVA(t.precio)}</td>
       <td>${fechaAR(t.fecha_ingreso)}</td>
@@ -401,9 +413,11 @@ function formCheque(c, onDone) {
       <label>Fecha cobro/venc. <input name="fecha_cobro" type="date" value="${fecha(c.fecha_cobro)}" /></label>
       ${galeriaCampo('cheque', c.id)}
     </div>`, async (f) => {
-    const body = { tipo: f.tipo.value, modalidad: f.modalidad.value, estado: f.estado.value, numero: f.numero.value, banco: f.banco.value,
+    const body = {
+      tipo: f.tipo.value, modalidad: f.modalidad.value, estado: f.estado.value, numero: f.numero.value, banco: f.banco.value,
       importe: Number(f.importe.value || 0), relacionado: f.relacionado.value,
-      fecha_emision: f.fecha_emision.value || null, fecha_cobro: f.fecha_cobro.value || null };
+      fecha_emision: f.fecha_emision.value || null, fecha_cobro: f.fecha_cobro.value || null
+    };
     if (c.id) await api('PUT', '/cheques/' + c.id, body); else await api('POST', '/cheques', body);
     cerrarModal(); (onDone || cargarCheques)();
   });
@@ -487,8 +501,10 @@ function formPago(p, onDone) {
       <label>Vencimiento <input name="fecha_vencimiento" type="date" value="${fecha(p.fecha_vencimiento)}" /></label>
       <label class="full">Notas <textarea name="notas">${esc(p.notas)}</textarea></label>
     </div>`, async (f) => {
-    const body = { concepto: f.concepto.value, importe: Number(f.importe.value || 0), estado: f.estado.value,
-      periodo: f.periodo.value, fecha_vencimiento: f.fecha_vencimiento.value || null, notas: f.notas.value };
+    const body = {
+      concepto: f.concepto.value, importe: Number(f.importe.value || 0), estado: f.estado.value,
+      periodo: f.periodo.value, fecha_vencimiento: f.fecha_vencimiento.value || null, notas: f.notas.value
+    };
     if (p.id) await api('PUT', '/pagos/' + p.id, body); else await api('POST', '/pagos', body);
     cerrarModal(); (onDone || cargarPagos)();
   });
@@ -675,7 +691,30 @@ async function vistaPrecios() {
       <label id="calc-l-m2" class="oculto">M² <input id="calc-m2" type="number" step="0.01" min="0" value="1" /></label>
       <label>Horas de diseño <input id="calc-horas" type="number" step="0.5" min="0" value="0" /></label>
       <div style="display:flex;flex-direction:column;gap:2px;font-size:.9rem" id="calc-out"></div>
-      ${puedeEditar() ? '<button id="calc-crear" class="btn-primary">Crear trabajo presupuestado</button>' : ''}
+      <button id="calc-agregar" class="btn-primary">➕ Agregar al presupuesto</button>
+    </div>
+    <h3>Presupuesto en armado</h3>
+    <div class="filtros" id="pres-panel">
+      <label>Cliente <input id="pres-cliente" placeholder="nombre o razón social" /></label>
+      <label>CUIT / DNI <input id="pres-cuit" placeholder="opcional" style="width:150px" /></label>
+      <label>Dirección <input id="pres-dir" placeholder="opcional" /></label>
+      <label>Localidad <input id="pres-loc" placeholder="opcional" style="width:140px" /></label>
+      <label>Cond. IVA <select id="pres-iva">
+        <option>Consumidor Final</option>
+        <option>Responsable Inscripto</option>
+        <option>Monotributo</option>
+        <option>Exento</option>
+      </select></label>
+      <label>Cond. de venta <select id="pres-venta">
+        <option>Contado</option>
+        <option>Cuenta corriente</option>
+      </select></label>
+      <label>Validez (días) <input id="pres-validez" type="number" min="1" value="15" style="width:90px" /></label>
+      <label style="flex:1;min-width:220px">Condiciones / notas <input id="pres-notas" placeholder="Seña 50%. Entrega: 7 días hábiles." /></label>
+      <div id="pres-lineas" style="width:100%"></div>
+      <button id="pres-generar" class="btn-dark">🖨 Generar presupuesto (PDF)</button>
+      ${puedeEditar() ? '<button id="pres-crear">Crear trabajo presupuestado</button>' : ''}
+      <button id="pres-vaciar" class="btn-danger">Vaciar</button>
     </div>
     <div class="filtros">
       ${puedeEditar() ? '<button id="btn-nuevo-precio" class="btn-primary">+ Nuevo ítem</button>' : ''}
@@ -687,6 +726,8 @@ async function vistaPrecios() {
 }
 
 let PRECIOS = [];
+let CARRITO = [];
+
 async function cargarPrecios() {
   PRECIOS = await api('GET', '/precios');
   const cont = $('#lista-precios');
@@ -702,8 +743,8 @@ async function cargarPrecios() {
         <td>${LBL.modo_precio[x.modo] || x.modo}</td>
         <td>${x.costo != null ? money(x.costo) : '—'}</td>
         <td>${x.modo === 'por_cantidad'
-          ? [[50, x.p50], [100, x.p100], [250, x.p250], [500, x.p500]].filter(([, v]) => v != null).map(([n2, v]) => `×${n2}: <b>${money(v)}</b>/u`).join(' · ') || '—'
-          : x.precio != null ? `<b>${money(x.precio)}</b> ${x.modo === 'por_m2' ? '/m²' : '/hora'}` : '—'}</td>
+        ? [[50, x.p50], [100, x.p100], [250, x.p250], [500, x.p500]].filter(([, v]) => v != null).map(([n2, v]) => `×${n2}: <b>${money(v)}</b>/u`).join(' · ') || '—'
+        : x.precio != null ? `<b>${money(x.precio)}</b> ${x.modo === 'por_m2' ? '/m²' : '/hora'}` : '—'}</td>
         <td>${esc(x.notas)}</td>
         <td class="acciones">${puedeEditar() ? `<button data-edit="${x.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${x.id}" class="btn-danger">Eliminar</button>` : ''}</td>
       </tr>`).join('')}</tbody></table>`;
@@ -714,6 +755,24 @@ async function cargarPrecios() {
     if (confirm('¿Eliminar este ítem de la lista de precios?')) { await api('DELETE', '/precios/' + b.dataset.del); cargarPrecios(); }
   });
   armarCalculadora();
+}
+
+function renderCarrito() {
+  const cont = $('#pres-lineas');
+  if (!cont) return;
+  if (!CARRITO.length) {
+    cont.innerHTML = '<span style="font-size:.85rem;color:var(--ga-texto-2)">Sin ítems: calculá arriba y tocá "Agregar al presupuesto".</span>';
+    return;
+  }
+  const total = CARRITO.reduce((a, l) => a + l.importe, 0);
+  cont.innerHTML = `<table><thead><tr><th>Concepto</th><th>Cant.</th><th>Unitario</th><th>Importe</th><th></th></tr></thead><tbody>
+    ${CARRITO.map((l, i) => `<tr>
+      <td>${esc(l.concepto)}${l.detalle ? ` <small style="color:var(--ga-texto-2)">${esc(l.detalle)}</small>` : ''}</td>
+      <td>${l.cantidad ?? ''}</td><td>${l.unit != null ? money(l.unit) : ''}</td><td>${money(l.importe)}</td>
+      <td class="acciones"><button data-quitar="${i}" title="Quitar">✕</button></td>
+    </tr>`).join('')}</tbody></table>
+    <p style="text-align:right;margin:8px 0 0">Subtotal: <b>${money(total)}</b> · c/IVA: <b>${conIVA(total)}</b></p>`;
+  cont.querySelectorAll('[data-quitar]').forEach((b) => b.onclick = () => { CARRITO.splice(Number(b.dataset.quitar), 1); renderCarrito(); });
 }
 
 function armarCalculadora() {
@@ -743,8 +802,9 @@ function armarCalculadora() {
     } else {
       const m2 = Math.max(0, Number($('#calc-m2').value || 0));
       if (item.precio == null) { out.innerHTML = '<span style="color:var(--ga-rojo)">Este ítem no tiene precio por m².</span>'; return null; }
-      sub = m2 * Number(item.precio);
-      detalle = `${m2} m² × ${money(item.precio)}`;
+      unit = Number(item.precio); cant = m2;
+      sub = m2 * unit;
+      detalle = `${m2} m² × ${money(unit)}`;
     }
     const tarifaDis = disenio ? Number(disenio.precio || 0) : 0;
     const dis = horas * tarifaDis;
@@ -752,7 +812,7 @@ function armarCalculadora() {
     out.innerHTML = `<span>${detalle} = <b>${money(sub)}</b></span>`
       + (horas > 0 ? `<span>Diseño: ${horas} h × ${money(tarifaDis)} = <b>${money(dis)}</b>${tarifaDis ? '' : ' ⚠️ tarifa de diseño en $0'}</span>` : '')
       + `<span style="font-size:1.05rem">TOTAL: <b>${money(total)}</b> · c/IVA: <b>${conIVA(total)}</b></span>`;
-    return { item, cant, unit, horas, dis, total, detalle };
+    return { item, cant, unit, horas, sub, dis, tarifaDis, total, detalle };
   };
 
   ['calc-item', 'calc-cant', 'calc-m2', 'calc-horas'].forEach((id) => {
@@ -761,18 +821,154 @@ function armarCalculadora() {
   });
   calc();
 
-  const btn = $('#calc-crear');
-  if (btn) btn.onclick = () => {
+  $('#calc-agregar').onclick = () => {
     const c = calc();
     if (!c) return toast('Completá la calculadora primero', 'error');
-    const desc = `${c.item.nombre} — ${c.detalle}` + (c.horas > 0 ? ` + diseño ${c.horas}h` : '');
-    const disciplina = LBL.disciplina[c.item.rubro] ? c.item.rubro : 'impresion';
-    const pre = { estado: 'presupuestado', disciplina, descripcion: desc, precio: c.total };
-    // Solo si no hay diseño el desglose cantidad×unitario coincide con el total
-    if (c.cant && c.horas === 0) { pre.cantidad = c.cant; pre.precio_unitario = c.unit; }
+    CARRITO.push({ concepto: c.item.nombre, detalle: c.detalle, cantidad: c.cant, unit: c.unit, importe: c.sub });
+    if (c.horas > 0) CARRITO.push({ concepto: 'Diseño', detalle: `${c.horas} h × ${money(c.tarifaDis)}`, cantidad: c.horas, unit: c.tarifaDis, importe: c.dis });
+    $('#calc-horas').value = 0;
+    renderCarrito();
+    toast('Agregado al presupuesto ✓');
+  };
+
+  $('#pres-vaciar').onclick = () => { CARRITO = []; renderCarrito(); };
+
+  $('#pres-generar').onclick = () => {
+    if (!CARRITO.length) return toast('Agregá ítems al presupuesto primero', 'error');
+    const total = CARRITO.reduce((a, l) => a + l.importe, 0);
+    const ahora = new Date();
+    const dd = (n) => String(n).padStart(2, '0');
+    const num = `P-${ahora.getFullYear()}${dd(ahora.getMonth() + 1)}${dd(ahora.getDate())}-${dd(ahora.getHours())}${dd(ahora.getMinutes())}`;
+    const html = htmlPresupuesto({
+      num,
+      fechaTxt: `${dd(ahora.getDate())}/${dd(ahora.getMonth() + 1)}/${ahora.getFullYear()}`,
+      cliente: $('#pres-cliente').value.trim() || 'Consumidor Final',
+      cuitCliente: $('#pres-cuit').value.trim(),
+      direccion: $('#pres-dir').value.trim(),
+      localidad: $('#pres-loc').value.trim(),
+      condIVA: $('#pres-iva').value,
+      condVenta: $('#pres-venta').value,
+      validez: Number($('#pres-validez').value || 15),
+      notas: $('#pres-notas').value.trim(),
+      lineas: CARRITO, total,
+    });
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const btnCrear = $('#pres-crear');
+  if (btnCrear) btnCrear.onclick = () => {
+    if (!CARRITO.length) return toast('Agregá ítems al presupuesto primero', 'error');
+    const total = CARRITO.reduce((a, l) => a + l.importe, 0);
+    const desc = CARRITO.map((l) => `${l.concepto} (${l.detalle})`).join(' + ');
+    const pre = {
+      estado: 'presupuestado', disciplina: 'impresion', descripcion: desc, precio: total,
+      contacto_nombre: $('#pres-cliente').value.trim()
+    };
+    if (CARRITO.length === 1 && CARRITO[0].cantidad && CARRITO[0].unit != null) {
+      pre.cantidad = CARRITO[0].cantidad; pre.precio_unitario = CARRITO[0].unit;
+    }
     formTrabajo(pre, () => toast('Trabajo presupuestado creado ✓'));
   };
+
+  renderCarrito();
 }
+
+// Documento A4 imprimible con la identidad de marca (mismo sistema que la web).
+function htmlPresupuesto({ num, fechaTxt, cliente, cuitCliente, direccion, localidad, condIVA, condVenta, validez, notas, lineas, total }) {
+  const t = DATOS_TALLER;
+  const filas = lineas.map((l) => `<tr>
+      <td>${esc(l.concepto)}${l.detalle ? `<div class="det">${esc(l.detalle)}</div>` : ''}</td>
+      <td class="der">${l.cantidad ?? ''}</td>
+      <td class="der">${l.unit != null ? money(l.unit) : ''}</td>
+      <td class="der">${money(l.importe)}</td>
+    </tr>`).join('');
+  const dirLinea = [direccion, localidad].filter(Boolean).join(', ');
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<base href="${location.origin}/">
+<title>Presupuesto ${num} — ${esc(t.nombre)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #56524f; font: 400 14px/1.55 'Inter', sans-serif; color: #1c1b1b; }
+  .hoja { width: 210mm; min-height: 297mm; margin: 0 auto; background: #FFFEF8; padding: 15mm 15mm 12mm; display: flex; flex-direction: column; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; }
+  header img { height: 44px; }
+  .fiscal { margin-top: 8px; font: 400 11px/1.6 'Inter', sans-serif; color: #42474c; }
+  .doc-tit { text-align: right; }
+  .doc-tit .ov { font: 600 12px/1 'Inter', sans-serif; letter-spacing: .2em; text-transform: uppercase; color: #805600; }
+  .doc-tit h1 { margin: 4px 0 2px; font: 800 28px/1 'Hanken Grotesk', sans-serif; letter-spacing: -.02em; }
+  .doc-tit .fch { font: 500 13px/1.4 'Inter', sans-serif; color: #42474c; }
+  .filo { height: 3px; background: #F6A800; margin: 14px 0 18px; }
+  .datos { display: flex; justify-content: space-between; gap: 30px; margin-bottom: 22px; }
+  .ov { font: 600 11px/1 'Inter', sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #805600; margin-bottom: 5px; }
+  .datos .v { font: 700 16px/1.3 'Hanken Grotesk', sans-serif; }
+  .datos .sub { font-size: 12.5px; color: #42474c; margin-top: 2px; }
+  .datos .der2 { text-align: right; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font: 600 11px/1 'Inter', sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #42474c; padding: 10px; border-bottom: 2px solid #121212; }
+  th.der, td.der { text-align: right; white-space: nowrap; }
+  td { padding: 11px 10px; border-bottom: 1px solid #e5e2e1; vertical-align: top; }
+  td .det { font-size: 12px; color: #42474c; margin-top: 2px; }
+  .totales { margin: 10px 0 0 auto; width: 64mm; }
+  .totales .fila { display: flex; justify-content: space-between; padding: 7px 10px; font-size: 13.5px; color: #42474c; }
+  .total-final { display: flex; justify-content: space-between; align-items: center; background: #121212; color: #fff; padding: 12px 14px; border-radius: 6px; margin-top: 4px; }
+  .total-final b { font: 800 20px 'Hanken Grotesk', sans-serif; color: #F6A800; }
+  .notas { margin-top: 22px; font-size: 13px; color: #42474c; border-left: 3px solid #F6A800; padding: 4px 12px; }
+  footer { margin-top: auto; padding-top: 16px; border-top: 1px solid #e5e2e1; }
+  .contacto { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #42474c; }
+  .contacto b { color: #1c1b1b; }
+  .legal { margin-top: 6px; font-size: 10.5px; color: #7a7f84; text-align: center; }
+  .imprimir { position: fixed; top: 14px; right: 14px; padding: 12px 20px; background: #F6A800; color: #121212; font: 600 14px 'Inter', sans-serif; border: none; border-radius: 4px; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+  @media print { .imprimir { display: none; } body { background: #FFFEF8; } }
+</style></head><body>
+<button class="imprimir" onclick="print()">🖨 Imprimir / Guardar PDF</button>
+<div class="hoja">
+  <header>
+    <div>
+      <img src="/brand/logo-negro.svg" alt="${esc(t.nombre)}">
+      <div class="fiscal">CUIT: ${esc(t.cuit)} · Ing. Brutos: ${esc(t.iibb)}<br>Inicio de actividades: ${esc(t.inicio)}</div>
+    </div>
+    <div class="doc-tit"><div class="ov">Presupuesto</div><h1>${num}</h1><div class="fch">${fechaTxt}</div></div>
+  </header>
+  <div class="filo"></div>
+  <div class="datos">
+    <div>
+      <div class="ov">Cliente</div>
+      <div class="v">${esc(cliente)}</div>
+      ${cuitCliente ? `<div class="sub">CUIT/DNI: ${esc(cuitCliente)}</div>` : ''}
+      ${dirLinea ? `<div class="sub">${esc(dirLinea)}</div>` : ''}
+      <div class="sub">IVA: ${esc(condIVA)}</div>
+    </div>
+    <div class="der2">
+      <div class="ov">Condición de venta</div>
+      <div class="v">${esc(condVenta)}</div>
+      <div class="ov" style="margin-top:10px">Validez</div>
+      <div class="v">${validez} días</div>
+    </div>
+  </div>
+  <table><thead><tr><th>Concepto</th><th class="der">Cant.</th><th class="der">P. unitario</th><th class="der">Importe</th></tr></thead>
+  <tbody>${filas}</tbody></table>
+  <div class="totales">
+    <div class="fila"><span>Subtotal</span><span>${money(total)}</span></div>
+    <div class="fila"><span>IVA (21%)</span><span>${money(total * (IVA - 1))}</span></div>
+    <div class="total-final"><span>TOTAL c/IVA</span><b>${conIVA(total)}</b></div>
+  </div>
+  ${notas ? `<div class="notas"><div class="ov">Condiciones</div>${esc(notas)}</div>` : ''}
+  <footer>
+    <div class="contacto">
+      <span>✉️ ${esc(t.correo)}</span>
+      <span><b>${esc(t.instagram)}</b></span>
+      <span>📱 ${esc(t.whatsapp)}</span>
+    </div>
+    <div class="legal">Presupuesto sin valor de comprobante fiscal · ${esc(t.nombre)}</div>
+  </footer>
+</div>
+</body></html>`;
+}
+// --- fin htmlPresupuesto ---
 
 function formPrecio(x) {
   x = x || {};
@@ -790,10 +986,12 @@ function formPrecio(x) {
       <label class="m-cant">$/unidad ×500 <input name="p500" type="number" step="0.01" value="${x.p500 ?? ''}" /></label>
       <label class="full">Notas <textarea name="notas">${esc(x.notas)}</textarea></label>
     </div>`, async (f) => {
-    const body = { rubro: f.rubro.value, modo: f.modo.value, nombre: f.nombre.value,
+    const body = {
+      rubro: f.rubro.value, modo: f.modo.value, nombre: f.nombre.value,
       costo: f.costo.value || null, precio: f.precio.value || null,
       p50: f.p50.value || null, p100: f.p100.value || null, p250: f.p250.value || null, p500: f.p500.value || null,
-      notas: f.notas.value };
+      notas: f.notas.value
+    };
     if (x.id) await api('PUT', '/precios/' + x.id, body); else await api('POST', '/precios', body);
     cerrarModal(); cargarPrecios();
   });
@@ -848,7 +1046,7 @@ async function cargarEmpresas() {
     <table><thead><tr><th>Nombre</th><th>Cond. pago</th><th>Contactos</th><th>Teléfono</th><th></th></tr></thead><tbody>
     ${filas.map((e) => `<tr>
       <td>${esc(e.nombre)}</td>
-      <td>${e.condicion_pago === 'diferido' ? badge('Diferido','alerta') : badge('Contado','neutro')}</td>
+      <td>${e.condicion_pago === 'diferido' ? badge('Diferido', 'alerta') : badge('Contado', 'neutro')}</td>
       <td>${e.contactos}</td><td>${esc(e.telefono)}</td>
       <td class="acciones"><button data-trab="${e.id}">Trabajos</button>${puedeEditar() ? `<button data-edit="${e.id}">Editar</button>` : ''}${esAdmin() ? `<button data-del="${e.id}" class="btn-danger">Eliminar</button>` : ''}</td>
     </tr>`).join('')}</tbody></table>` : '<p>Sin empresas todavía.</p>';

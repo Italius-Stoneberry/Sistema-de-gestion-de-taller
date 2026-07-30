@@ -59,6 +59,12 @@ services:
     image: devlikeapro/waha:latest
     container_name: taller-waha
     restart: unless-stopped
+    environment:
+      # Credenciales del panel: definí los valores en el .env (pisan lo guardado en el volumen).
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME:-admin}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:-cambiar_esta_clave}
+      # API key que exige WAHA: la MISMA que usan la app y n8n (WAHA_API_KEY del .env).
+      WHATSAPP_API_KEY: ${WAHA_API_KEY:-}
     volumes:
       - waha_data:/app/.sessions
     ports:
