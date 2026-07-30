@@ -40,11 +40,13 @@ const SCHEMA = {
   clasificar: {
     type: 'object',
     properties: {
-      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar', 'nuevo_cheque', 'ver_cheques', 'cheque_cobrado', 'nuevo_pago', 'ver_pagos', 'pago_hecho', 'nueva_compra', 'ver_compras', 'compra_hecha', 'ayuda'] },
+      intencion: { type: 'string', enum: ['nuevo_trabajo', 'actualizar_trabajo', 'consulta', 'ver_activos', 'ver_bandeja', 'ver_sin_presupuestar', 'resumen', 'confirmar', 'descartar', 'nuevo_cheque', 'ver_cheques', 'cheque_cobrado', 'nuevo_pago', 'ver_pagos', 'pago_hecho', 'nueva_compra', 'ver_compras', 'compra_hecha', 'cotizar', 'ver_precios', 'ayuda', 'nada'] },
+      confianza: { type: 'string', enum: ['alta', 'baja'] },
       id: NUL('integer'), empresa: NUL('string'), contacto: NUL('string'),
       descripcion: NUL('string'), disciplina: NUL('string'), precio: NUL('integer'),
+      item: NUL('string'), cantidad: NUL('integer'), m2: NUL('number'), horas: NUL('number'),
     },
-    required: ['intencion'],
+    required: ['intencion', 'confianza'],
   },
   actualizar: {
     type: 'object',
@@ -147,6 +149,19 @@ async function setCtx(chatId, estado, datos) {
     [chatId, estado, JSON.stringify(datos || {})]);
 }
 
+// Guarda "de qué estábamos hablando" SIN pisar el resto del contexto (pendiente, lista...).
+// Es lo que le permite entender respuestas cortas: "mostrámelos", "cuáles", "dale".
+async function setUltimo(chatId, tema, extra) {
+  if (!chatId) return;
+  const ctx = await getCtx(chatId);
+  await setCtx(chatId, ctx.estado || 'idle', { ...(ctx.datos || {}), ultimo: tema, ...(extra || {}) });
+}
+
+// Texto normalizado: sin acentos, sin puntuación, en minúsculas. Para comparar sin sorpresas.
+const normTxt = (s) => String(s || '').toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
 async function contextoClientes() {
   const emp = await query('SELECT nombre FROM empresas ORDER BY creado_en DESC LIMIT 40');
   const con = await query('SELECT c.nombre, e.nombre AS empresa FROM contactos c LEFT JOIN empresas e ON e.id = c.empresa_id ORDER BY c.creado_en DESC LIMIT 40');
@@ -163,9 +178,67 @@ async function contar() {
     FROM trabajos`);
   return rows[0];
 }
-async function menuTexto() {
+// Menú NUMERADO: el usuario contesta "4" y sabe exactamente qué va a recibir.
+// Cada opción trae su cantidad de pendientes, así el menú ya informa por sí solo.
+const OPCIONES = { 1: 'trabajos', 2: 'bandeja', 3: 'sin_presupuestar', 4: 'cheques', 5: 'pagos', 6: 'compras', 7: 'precios' };
+async function menuOpciones() {
   const c = await contar();
-  return `🤖 ¡Buenas! Tenés:\n• ${c.activos} trabajos en curso\n• ${c.bandeja} en la bandeja sin confirmar\n• ${c.sin_presup} sin presupuestar\n\nHablame normal: cargá pedidos, actualizá estados, anotá cheques ("me dieron un cheque de X"), pagos ("hay que pagar la luz") o compras ("falta tinta"). También preguntame "qué me deben", "ver cheques", "ver compras".`;
+  const uno = async (sql) => Number((await query(sql)).rows[0].n) || 0;
+  const chq = await uno(`SELECT COUNT(*)::int n FROM cheques WHERE estado='pendiente'`);
+  const pag = await uno(`SELECT COUNT(*)::int n FROM pagos_servicios WHERE estado='pendiente'`);
+  const comp = await uno(`SELECT COUNT(*)::int n FROM lista_compras WHERE NOT comprado`);
+  const pre = await uno(`SELECT COUNT(*)::int n FROM precios WHERE activo`);
+  return `1) Trabajos en curso (${c.activos})\n`
+    + `2) Bandeja sin confirmar (${c.bandeja})\n`
+    + `3) Sin presupuestar (${c.sin_presup})\n`
+    + `4) Cheques pendientes (${chq})\n`
+    + `5) Pagos por vencer (${pag})\n`
+    + `6) Lista de compras (${comp})\n`
+    + `7) Lista de precios (${pre})`;
+}
+async function menuTexto(chatId) {
+  const ops = await menuOpciones();
+  if (chatId) await setUltimo(chatId, 'menu');
+  return `🤖 ¿Qué querés ver? Contestame con el número:\n\n${ops}\n\n`
+    + `O hablame normal: "ramiro quiere 100 remeras a 80 lucas", "cuánto salen 100 remeras", "cobré el cheque de andreu".`;
+}
+// Respuesta cuando NO entendimos. Lo importante: avisa que no guardó nada y ofrece
+// salidas concretas. Antes, cualquier mensaje raro terminaba creando un trabajo fantasma.
+async function noEntendi(chatId) {
+  const ops = await menuOpciones();
+  if (chatId) await setUltimo(chatId, 'menu');
+  return `🤔 No te entendí, así que no anoté nada. Contestame con un número:\n\n${ops}\n\n`
+    + `O decime algo concreto, por ejemplo:\n`
+    + `• "ramiro quiere 100 remeras a 80 lucas"\n`
+    + `• "cuánto salen 100 remeras"\n`
+    + `• "cobré el cheque de andreu"\n`
+    + `• "el 3 se terminó y se cobró"`;
+}
+// Resuelve una opción del menú, o un "mostrámelos" que apunta al tema anterior.
+async function mostrarTema(chatId, tema) {
+  if (tema === 'trabajos') return listarActivos(chatId);
+  if (tema === 'bandeja') return listarBandeja();
+  if (tema === 'sin_presupuestar') return listarSinPresup();
+  if (tema === 'cheques') return listarCheques(null);
+  if (tema === 'pagos') return listarPagos();
+  if (tema === 'compras') return listarCompras();
+  if (tema === 'precios') return textoListaPrecios();
+  return null;
+}
+// Frases deícticas sueltas: piden ver "eso" de lo que veníamos hablando.
+// Se testean contra el texto normalizado (sin acentos ni signos).
+const RE_MOSTRAR = /^(dale\s+)?(y\s+)?(bueno\s+)?(a ver|ver|verlos|verlas|mostra|mostrame|mostramelo|mostramelos|mostramela|mostramelas|mostralo|mostralos|mostrala|mostralas|pasame|pasamelos|pasamelas|dame|damelos|cual|cuales|esos|esas|eso|los|las|cuales son|mostra la lista)$/;
+// Guardia anti-fantasmas: solo damos por hecho que es un pedido nuevo si hay
+// cliente REAL + descripción + una frase de verdad. "mostramelo" ya no es un trabajo.
+const RE_NO_CLIENTE = /^(mostrame|mostramelo|mostramelos|mostramela|mostramelas|mostralo|mostralos|dale|ok|oka|eso|esos|esas|si|no|cual|cuales|menu|hola|buenas|gracias|listo|ver|a ver|pasame|dame|nada|cliente|cliente individual|individual|sin nombre|el|la|los|las)$/;
+function pareceTrabajo(texto, d) {
+  const emp = (d && d.empresa ? String(d.empresa) : '').trim();
+  const con = (d && d.contacto ? String(d.contacto) : '').trim();
+  const creibles = [emp, con].filter(Boolean).filter((x) => !RE_NO_CLIENTE.test(normTxt(x)));
+  if (!creibles.length) return false;                                     // sin cliente creíble
+  if (!(d.descripcion && String(d.descripcion).trim())) return false;     // sin qué hacer
+  if (normTxt(texto).split(' ').filter(Boolean).length < 3) return false; // dos palabras no son un pedido
+  return true;
 }
 function ayudaTexto() {
   return `🤖 Soy tu asistente del taller. Hablame como quieras, en criollo. Esto es lo que puedo hacer:\n\n`
@@ -179,6 +252,10 @@ function ayudaTexto() {
     + `💡 *PAGOS Y SERVICIOS*\n`
     + `• Anotar: "hay que pagar la luz 30 lucas el viernes"\n`
     + `• Ver / pagar: "ver pagos", "pagué la luz"\n\n`
+    + `💲 *PRECIOS*\n`
+    + `• Cotizar: "cuánto salen 100 remeras", "precio de 3 m2 de vinilo"\n`
+    + `• Ver todo: "lista de precios"\n`
+    + `• Después de cotizar: "anotalo para andreu" y te lo cargo como trabajo\n\n`
     + `🛒 *COMPRAS*\n`
     + `• Anotar: "falta tinta negra"\n`
     + `• Ver / tachar: "ver compras", "ya compré la tinta"\n\n`
@@ -431,6 +508,132 @@ async function marcarCompraHecha(nombre) {
   return rows[0];
 }
 
+// ---- Lista de precios y cotizador ----
+// Espeja la calculadora de la web: p50/p100/p250/p500 son precios POR UNIDAD
+// según la escala, y precio es el valor por m² o por hora.
+const ESCALAS = [
+  { min: 500, campo: 'p500' }, { min: 250, campo: 'p250' },
+  { min: 100, campo: 'p100' }, { min: 50, campo: 'p50' },
+];
+const LBL_RUBRO = { serigrafia: 'Serigrafía', laser: 'Grabado láser', impresion: 'Impresión', ploteo: 'Ploteo', diseno: 'Diseño' };
+const RUBRO_DISC = { serigrafia: 'serigrafia', laser: 'laser', ploteo: 'ploteo', impresion: 'impresion', diseno: 'impresion' };
+// "remeras" -> "remera", "papeles" -> "papel": empareja singular/plural sin diccionario.
+const singular = (w) => (w.length > 3 && /s$/.test(w) ? w.replace(/es$/, '').replace(/s$/, '') : w);
+// Cuánto del NOMBRE del ítem aparece en la consulta (0 a 1).
+function puntajeItem(nombre, consulta) {
+  const a = normTxt(nombre).split(' ').map(singular).filter((w) => w.length > 2);
+  const b = normTxt(consulta).split(' ').map(singular).filter((w) => w.length > 2);
+  if (!a.length || !b.length) return 0;
+  let hit = 0;
+  for (const w of a) if (b.some((x) => x === w || x.includes(w) || w.includes(x))) hit++;
+  return hit / a.length;
+}
+function candidatosItem(rows, consulta) {
+  return rows.map((it) => ({ it, p: puntajeItem(it.nombre, consulta) }))
+    .filter((x) => x.p >= 0.5).sort((a, b) => b.p - a.p);
+}
+// Tramo de precio que corresponde a esa cantidad: el más alto que no la supere.
+// Si pide menos que el tramo más chico cargado, se usa ese (no regalamos el trabajo).
+function escalaInfo(it, cant) {
+  const tramos = ESCALAS.filter((e) => Number(it[e.campo]) > 0);
+  if (!tramos.length) return null;
+  const elegido = tramos.find((e) => cant >= e.min) || tramos[tramos.length - 1];
+  return { unitario: Number(it[elegido.campo]), desde: elegido.min };
+}
+async function itemsPrecios() {
+  const { rows } = await query('SELECT * FROM precios WHERE activo ORDER BY rubro, nombre');
+  return rows;
+}
+async function textoListaPrecios() {
+  const rows = await itemsPrecios();
+  if (!rows.length) return '💲 Todavía no hay nada en la lista de precios. Cargala en la web (pestaña Precios) y después preguntame "cuánto salen 100 remeras".';
+  const porRubro = {};
+  for (const r of rows) (porRubro[r.rubro] = porRubro[r.rubro] || []).push(r);
+  const bloques = Object.keys(porRubro).map((rb) => {
+    const lineas = porRubro[rb].map((it) => {
+      if (it.modo === 'por_m2') return `• ${it.nombre}: ${money(it.precio)} el m²`;
+      if (it.modo === 'por_hora') return `• ${it.nombre}: ${money(it.precio)} la hora`;
+      const esc = ESCALAS.filter((e) => Number(it[e.campo]) > 0)
+        .map((e) => `${e.min}+ ${money(it[e.campo])}`).reverse().join(' · ');
+      return `• ${it.nombre} (c/u): ${esc || 'sin precios cargados'}`;
+    });
+    return `*${LBL_RUBRO[rb] || rb}*\n` + lineas.join('\n');
+  });
+  return '💲 Lista de precios:\n\n' + bloques.join('\n\n') + '\n\nPreguntame, ej: "cuánto salen 100 remeras".';
+}
+async function renderCotiza(from, it, cant, unidad, unitario, desde) {
+  if (!(unitario > 0)) return `${it.nombre} no tiene precio cargado. Cargalo en la web (pestaña Precios) y te lo calculo.`;
+  const etiqueta = unidad === 'u' ? 'c/u' : unidad === 'hs' ? 'la hora' : 'el m²';
+  const cantTxt = unidad === 'u' ? `${cant} u` : unidad === 'hs' ? `${cant} hs` : `${cant} m²`;
+  const total = Math.round(unitario * cant);
+  const L = [`💲 ${it.nombre} — ${cantTxt}`];
+  L.push(`Unitario: ${money(unitario)} ${etiqueta}${desde ? ` (escala ${desde}+)` : ''}`);
+  L.push(`Total: *${money(total)}*  ·  con IVA: ${money(Math.round(total * 1.21))}`);
+  const costo = Number(it.costo) || 0;
+  if (costo > 0) {
+    const cTotal = Math.round(costo * cant);
+    L.push(`Te sale ${money(cTotal)} · margen ${Math.round(((total - cTotal) / total) * 100)}%`);
+  }
+  if (it.notas) L.push(`📝 ${it.notas}`);
+  L.push('\nSi va, decime "anotalo para <cliente>" y lo cargo como trabajo.');
+  const ctx = await getCtx(from);
+  const datos = { ...(ctx.datos || {}) };
+  delete datos.pendiente;   // cambiamos de tema: un "ok" ahora es sobre la cotización
+  await setCtx(from, 'idle', {
+    ...datos, ultimo: 'cotizacion',
+    cotizacion: { item_id: it.id, nombre: it.nombre, rubro: it.rubro, cant, unidad, unitario, total },
+  });
+  return L.join('\n');
+}
+async function cotizarItem(from, it, cant) {
+  if (!(cant > 0)) return 'Necesito la cantidad. ¿Cuántos?';
+  if (it.modo === 'por_m2') return renderCotiza(from, it, cant, 'm²', Number(it.precio) || 0);
+  if (it.modo === 'por_hora') return renderCotiza(from, it, cant, 'hs', Number(it.precio) || 0);
+  const esc = escalaInfo(it, cant);
+  if (!esc) return `${it.nombre} no tiene precios por escala cargados. Cargalos en la web (pestaña Precios).`;
+  return renderCotiza(from, it, cant, 'u', esc.unitario, esc.desde);
+}
+async function cotizarTexto(from, d, texto) {
+  const rows = await itemsPrecios();
+  if (!rows.length) return '💲 Todavía no cargaste la lista de precios. Metela en la web (pestaña Precios) y después preguntame "cuánto salen 100 remeras".';
+  const cand = candidatosItem(rows, [d && d.item, texto].filter(Boolean).join(' '));
+  if (!cand.length) {
+    return `No encontré ese ítem en la lista. Tengo: ${rows.map((r) => r.nombre).join(', ')}.\n`
+      + `Probá: "cuánto salen 100 ${String(rows[0].nombre).toLowerCase()}".`;
+  }
+  const empate = cand.filter((x) => x.p === cand[0].p);
+  if (empate.length > 1) return `¿Cuál de estos? ${empate.map((x) => x.it.nombre).join(' / ')}. Repetime la pregunta con el nombre exacto.`;
+  const it = cand[0].it;
+  const nums = (String(texto).match(/\d+(?:[.,]\d+)?/g) || []).map((s) => Number(s.replace(',', '.')));
+  let cant = 0;
+  if (it.modo === 'por_m2') cant = Number(d && d.m2) || nums[0] || 0;
+  else if (it.modo === 'por_hora') cant = Number(d && d.horas) || nums[0] || 0;
+  else cant = Number(d && d.cantidad) || nums[0] || 0;
+  if (!(cant > 0)) {
+    const preg = it.modo === 'por_m2' ? '¿Cuántos m²?' : it.modo === 'por_hora' ? '¿Cuántas horas?' : '¿Cuántas unidades?';
+    const ctx = await getCtx(from);
+    await setCtx(from, 'cotizando', { ...(ctx.datos || {}), cotiza_item: it.id });
+    return `${it.nombre}: ${preg} (decime solo el número)`;
+  }
+  return cotizarItem(from, it, cant);
+}
+// "anotalo para Andreu" después de una cotización: crea el borrador con cantidad y unitario.
+const RE_ANOTAR = /\b(anotal[oa]|anota|anotame|cargal[oa]|carga|guardal[oa]|guarda|meteme|metel[oa])\b/i;
+async function anotarCotizacion(from, ctx, texto) {
+  const co = ctx.datos && ctx.datos.cotizacion;
+  if (!co) return null;
+  const m = String(texto).match(/\bpara\s+(.{2,60})$/i);
+  const nombre = m ? m[1].trim().replace(/[.!?,;]+$/, '') : '';
+  if (!nombre) return '¿Para qué cliente lo anoto? Decime "anotalo para <nombre>".';
+  const e = await query("SELECT nombre FROM empresas WHERE nombre ILIKE $1 LIMIT 1", [nombre]);
+  const campos = e.rows[0] ? { empresa: e.rows[0].nombre, contacto: null } : { empresa: null, contacto: nombre };
+  const desc = co.unidad === 'u' ? `${co.cant} x ${co.nombre}` : `${co.cant} ${co.unidad} de ${co.nombre}`;
+  const tr = await crearBorradorDesde({ ...campos, descripcion: desc, disciplina: RUBRO_DISC[co.rubro] || 'impresion', precio: co.total });
+  await query('UPDATE trabajos SET cantidad = $1, precio_unitario = $2 WHERE id = $3', [co.cant, co.unitario, tr.id]);
+  await setCtx(from, 'confirmando', { pendiente: { tipo: 'trabajo', id: tr.id, texto }, ultimo: 'bandeja' });
+  return `🆕 Anoté #${tr.id}: ${tr.cliente} — ${desc} — ${money(co.total)} (${money(co.unitario)} c/u).\nRespondé "ok" para confirmar, "no" para descartar.`;
+}
+
 // ---- Secretario proactivo: resumen de pendientes ----
 async function nudgeTexto() {
   const c = await contar();
@@ -439,14 +642,25 @@ async function nudgeTexto() {
   const pag = await q(`SELECT COUNT(*)::int n FROM pagos_servicios WHERE estado='pendiente' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= CURRENT_DATE + INTERVAL '5 days'`);
   const esp = await q(`SELECT COUNT(*)::int n FROM trabajos WHERE estado='en_espera' AND revisado`);
   const comp = await q(`SELECT COUNT(*)::int n FROM lista_compras WHERE NOT comprado`);
-  const L = ['🤖 ¿Cómo venís? Te recuerdo lo que hay:'];
-  L.push(`• ${c.activos} trabajo(s) en curso${esp.n ? `, ${esp.n} en espera` : ''}`);
-  if (c.bandeja) L.push(`• ${c.bandeja} en la bandeja sin confirmar`);
-  if (c.sin_presup) L.push(`• ${c.sin_presup} sin presupuestar`);
-  if (chq.n) L.push(`• ${chq.n} cheque(s) por cobrar pronto (${money(chq.t)})`);
-  if (pag.n) L.push(`• ${pag.n} pago(s) por vencer`);
-  if (comp.n) L.push(`• 🛒 ${comp.n} cosa(s) en la lista de compras`);
-  L.push('\n¿Algún trabajo avanzó o cobraste algo? Contame y lo actualizo. 👍');
+  // Solo lo que REQUIERE acción. Si esta lista queda vacía, no mandamos nada:
+  // el recordatorio de las 9 y las 22 no tiene que ser ruido de fondo.
+  const pend = [];
+  if (c.bandeja) pend.push(`• ${c.bandeja} en la bandeja sin confirmar`);
+  if (c.sin_presup) pend.push(`• ${c.sin_presup} sin presupuestar`);
+  if (chq.n) pend.push(`• ${chq.n} cheque(s) por cobrar pronto (${money(chq.t)})`);
+  if (pag.n) pend.push(`• ${pag.n} pago(s) por vencer`);
+  if (esp.n) pend.push(`• ${esp.n} trabajo(s) frenados en espera`);
+  if (comp.n) pend.push(`• 🛒 ${comp.n} cosa(s) en la lista de compras`);
+  if (!pend.length) return null;   // todo al día: silencio
+  let hora = 9;
+  try {
+    hora = Number(new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hourCycle: 'h23' }).format(new Date())) || 0;
+  } catch { hora = new Date().getHours(); }
+  const manana = hora < 14;
+  const L = [manana ? '☀️ Buen día. Para arrancar:' : '🌙 Cierre del día. Quedó pendiente:'];
+  L.push(...pend);
+  if (c.activos) L.push(`• ${c.activos} trabajo(s) en curso`);
+  L.push(manana ? '\n¿Arrancamos por alguno? Contame y lo actualizo. 👍' : '\n¿Algo avanzó o cobraste hoy? Contame y lo actualizo. 👍');
   return L.join('\n');
 }
 
@@ -520,8 +734,10 @@ function promptClasificar(texto, ctxNegocio) {
   return `Sos el asistente de un taller gráfico. Interpretás WhatsApp informal (jerga argentina).\n\n${ctxNegocio}\n\n`
     + `El usuario escribió: "${texto}".\nDevolvé SOLO un JSON con:\n`
     + `- "intencion": una de las de la lista.\n`
+    + `- "confianza": "alta" si estás seguro; "baja" si el mensaje es corto, vago o ambiguo.\n`
     + `- "id": número de trabajo si menciona uno (#5), si no null.\n`
-    + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo|impresion), "precio" (entero, 0 si no hay). impresion = tarjetería, lonas, fotocopias, folletería y afines.\n\n`
+    + `- si es nuevo_trabajo: "empresa", "contacto", "descripcion", "disciplina" (laser|serigrafia|ploteo|impresion), "precio" (entero, 0 si no hay). impresion = tarjetería, lonas, fotocopias, folletería y afines.\n`
+    + `- si es cotizar: "item" (qué producto pregunta, ej "remeras"), "cantidad" (entero) o "m2" o "horas" según corresponda; lo que no diga, null.\n\n`
     + `Cómo elegir la intención:\n`
     + `- nuevo_trabajo: encarga un TRABAJO por primera vez (cliente + cantidad/producto). Ej: "ramiro quiere 100 volantes".\n`
     + `- actualizar_trabajo: cambio sobre un trabajo YA existente (se terminó/cobró/facturó, cambiar estado/precio/disciplina, presupuestar). Ej: "el de andreu se entregó", "poné el 3 en espera", "presupuestá el 5 en 40 lucas".\n`
@@ -532,10 +748,14 @@ function promptClasificar(texto, ctxNegocio) {
     + `- ver_pagos: pregunta qué servicios hay que pagar. Ej: "¿qué hay que pagar?", "¿qué facturas vencen?", "¿debo algún servicio?", "ver pagos". pago_hecho: YA lo pagó ("pagué la luz", "ya está el alquiler", "salió el gas").\n`
     + `- nueva_compra: anotar un INSUMO/material para comprar (tinta, vinilo, papel, planchas). Ej: "anotá que falta tinta negra", "se acabó el papel", "hay que comprar vinilo blanco", "traé 2 rollos de lona". Palabras clave: falta, se acabó, comprar, traer.\n`
     + `- ver_compras: pregunta qué falta comprar. Ej: "¿qué hay que comprar?", "¿qué falta?", "lista de compras". compra_hecha: YA lo compró ("compré la tinta", "ya traje los rollos").\n`
+    + `- cotizar: pregunta CUÁNTO SALE / CUÁNTO COBRO algo, sin nombrar cliente. Ej: "cuánto salen 100 remeras", "precio de 50 tazas", "cuánto cobro 3 m2 de vinilo", "cotizame 200 volantes".\n`
+    + `- ver_precios: pide la lista de precios completa. Ej: "lista de precios", "qué precios tengo cargados", "mostrame los precios".\n`
     + `- ayuda: no sabe qué puede hacer o pide instrucciones. Ej: "qué puedo hacer", "cómo funciona esto", "ayuda".\n`
+    + `- nada: el mensaje NO alcanza para actuar: es corto, deíctico o una respuesta suelta sin contexto. Ej: "mostramelo", "mostramelos", "dale", "eso", "y eso?", "cuáles", "ah ok", "jaja", "?".\n`
     + `- ver_activos / ver_bandeja / ver_sin_presupuestar: pide ver esas listas. resumen: "cómo viene/menú/hola".\n`
     + `- confirmar/descartar: "ok/sí" o "no" a un borrador.\n\n`
     + `Distinguí bien: (1) FACTURA/boleta/servicio que se PAGA = pagos; INSUMO/material que se COMPRA en un comercio = compras. (2) El tiempo verbal decide entre anotar y tachar: "hay que pagar / llegó / falta / se acabó" = anotar pendiente (nuevo_pago / nueva_compra); "pagué / ya está / compré / traje" = marcar hecho (pago_hecho / compra_hecha). (3) Un cheque siempre lleva la palabra cheque; si la pregunta menciona CHEQUES ("¿hay cheques por pagar/cobrar?") es ver_cheques, NUNCA consulta: consulta es SOLO para plata de trabajos ("qué me deben", "cuánto facturé").\n`
+    + `REGLA IMPORTANTE: nuevo_trabajo SOLO si el mensaje nombra un cliente Y qué hay que hacer. Si falta cualquiera de los dos, o si es una respuesta corta al mensaje anterior ("mostramelo", "dale", "cuáles", "el segundo"), la intención es "nada" con confianza "baja". NUNCA inventes un cliente ni conviertas un pedido de ver algo en un trabajo nuevo. Si preguntan por PRECIO sin nombrar cliente es cotizar, no nuevo_trabajo.\n`
     + `Reglas de cliente (usá las listas de arriba): empresa conocida => empresa; contacto conocido => persona; "X de Y" => contacto X, empresa Y; nombre suelto desconocido => contacto (individual), empresa "". Nunca pongas "cliente individual" como nombre; si no hay empresa, empresa: "".\n`
     + `Jerga: lucas=miles (80 lucas=80000), palo=millón, gamba=100.`;
 }
@@ -635,7 +855,7 @@ router.post('/mensaje', async (req, res) => {
         await setCtx(from, 'confirmando', { pendiente: { tipo: 'cheque', id: ch.id, texto } });
         return res.json({ reply: `🧾📎 Anoté un cheque${ch.modalidad === 'electronico' ? ' electrónico (e-check)' : ''} ${ch.tipo === 'recibido' ? 'a cobrar de' : 'a pagar a'} ${ch.relacionado || '—'} ${money(ch.importe)} con la foto adjunta.\nRespondé "ok" para confirmarlo, "no" para descartarlo, o corregime (ej: "es a pagar", "son 250 lucas").` });
       }
-      if (clasif.intencion === 'nuevo_trabajo') {
+      if (clasif.intencion === 'nuevo_trabajo' && pareceTrabajo(texto, clasif)) {
         const tr = await crearBorradorDesde(clasif);
         await adjuntar('trabajo', tr.id, archivo, mime, texto);
         await setCtx(from, 'confirmando', { pendiente: { tipo: 'trabajo', id: tr.id, texto } });
@@ -668,7 +888,17 @@ router.post('/mensaje', async (req, res) => {
 
   if (esSalir(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: '👍 Cuando quieras.' }); }
   if (esAyuda(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: ayudaTexto() }); }
-  if (esSaludo(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: await menuTexto() }); }
+  if (esSaludo(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: await menuTexto(from) }); }
+
+  // ---- Esperando la cantidad de una cotización ("¿cuántas unidades?") ----
+  if (ctx.estado === 'cotizando') {
+    if (/^cancel/i.test(t)) { await setCtx(from, 'idle', {}); return res.json({ reply: '👍 Listo, cancelado.' }); }
+    const n = (String(texto).match(/\d+(?:[.,]\d+)?/) || [])[0];
+    if (!n) return res.json({ reply: 'Decime solo el número (ej: "100"), o "cancelar".' });
+    const { rows } = await query('SELECT * FROM precios WHERE id = $1', [ctx.datos && ctx.datos.cotiza_item]);
+    if (!rows[0]) { await setCtx(from, 'idle', {}); return res.json({ reply: 'Se me perdió el ítem 😅 Preguntame de nuevo, ej: "cuánto salen 100 remeras".' }); }
+    return res.json({ reply: await cotizarItem(from, rows[0], Number(String(n).replace(',', '.'))) });
+  }
 
   // Diálogo guiado de actualización (cuando pediste la lista)
   if (ctx.estado === 'eligiendo') {
@@ -723,6 +953,12 @@ router.post('/mensaje', async (req, res) => {
     // No era una corrección: sigue el flujo normal (consulta, otro pedido, etc.)
   }
 
+  // "anotalo para Andreu" justo después de una cotización → trabajo con cantidad y unitario.
+  if (ctx.datos && ctx.datos.cotizacion && RE_ANOTAR.test(t)) {
+    const r = await anotarCotizacion(from, ctx, texto);
+    if (r) return res.json({ reply: r });
+  }
+
   // Atajo: "ok"/"no" sobre un borrador recién anotado → resolver sin llamar a la IA.
   if (ctx.datos && ctx.datos.pendiente && ctx.datos.pendiente.id && (esSi(t) || esNo(t))) {
     const pend = ctx.datos.pendiente;
@@ -734,31 +970,56 @@ router.post('/mensaje', async (req, res) => {
     return res.json({ reply: accion === 'descartar' ? `🗑 ${et} descartado.` : `✅ ${et} confirmado.` });
   }
 
-  if (esOpcion(1)) return res.json({ reply: await listarActivos(from) });
-  if (esOpcion(2)) return res.json({ reply: await listarBandeja() });
-  if (esOpcion(3)) return res.json({ reply: await listarSinPresup() });
+  // Responde una opción del menú numerado (1 a 7) y recuerda el tema.
+  const responderTema = async (tema) => {
+    const r = await mostrarTema(from, tema);
+    await setUltimo(from, tema);
+    return res.json({ reply: r });
+  };
+  for (const n of Object.keys(OPCIONES)) if (esOpcion(n)) return responderTema(OPCIONES[n]);
 
   // Atajos directos sin pasar por la IA: responden al instante aunque el modelo
   // esté descargado de la GPU (arranque en frío) y nunca se clasifican mal.
-  if (/^(ver\s+)?(los\s+)?trabajos(\s+(en\s+curso|activos|pendientes))?\s*\??$/i.test(t) || t === 'activos') return res.json({ reply: await listarActivos(from) });
-  if (/^(ver\s+)?(la\s+)?bandeja\s*\??$/i.test(t)) return res.json({ reply: await listarBandeja() });
-  if (/^(ver\s+)?(los\s+)?cheques(\s+pendientes)?\s*\??$/i.test(t)) return res.json({ reply: await listarCheques(null) });
-  if (/^(ver\s+)?(los\s+)?pagos(\s+pendientes)?\s*\??$/i.test(t)) return res.json({ reply: await listarPagos() });
-  if (/^(ver\s+)?(la\s+)?(lista(\s+de\s+compras)?|compras)\s*\??$/i.test(t)) return res.json({ reply: await listarCompras() });
-  if (/^(ver\s+)?sin\s+presupuestar\s*\??$/i.test(t)) return res.json({ reply: await listarSinPresup() });
+  // Sacamos los prefijos de cortesía para que "dale mostrame los cheques" ≡ "cheques".
+  const tt = normTxt(t)
+    .replace(/^(dale|ok|oka|che|por favor|porfa|bueno|si|y)\s+/, '')
+    .replace(/^(mostrame|mostrar|mostra|pasame|pasar|dame|quiero ver|querria ver|necesito ver|veamos|listame|abrime|abri|ver)\s+/, '')
+    .replace(/^(los|las|el|la|mis|un|una)\s+/, '')
+    .trim();
+  const atajo = (re) => re.test(t) || re.test(tt);
+  if (atajo(/^(ver\s+)?(los\s+)?trabajos(\s+(en\s+curso|activos|pendientes))?\s*\??$/i) || tt === 'activos') return responderTema('trabajos');
+  if (atajo(/^(ver\s+)?(la\s+)?bandeja\s*\??$/i)) return responderTema('bandeja');
+  if (atajo(/^(ver\s+)?(los\s+)?cheques(\s+pendientes)?\s*\??$/i)) return responderTema('cheques');
+  if (atajo(/^(ver\s+)?(los\s+)?pagos(\s+pendientes)?\s*\??$/i)) return responderTema('pagos');
+  if (atajo(/^(ver\s+)?(la\s+)?lista\s+de\s+precios\s*\??$/i) || tt === 'precios' || atajo(/^precios\s*\??$/i)) return responderTema('precios');
+  if (atajo(/^(ver\s+)?(la\s+)?(lista(\s+de\s+compras)?|compras)\s*\??$/i)) return responderTema('compras');
+  if (atajo(/^(ver\s+)?sin\s+presupuestar\s*\??$/i)) return responderTema('sin_presupuestar');
+
+  // Respuestas deícticas: "mostrámelos", "cuáles", "dale pasame". Se refieren a lo
+  // último que nombramos. Sin esto, terminaban creando un trabajo fantasma con precio 0.
+  if (RE_MOSTRAR.test(normTxt(texto))) {
+    const tema = ctx.datos && ctx.datos.ultimo;
+    if (tema && Object.values(OPCIONES).includes(tema)) return responderTema(tema);
+    return res.json({ reply: await noEntendi(from) });
+  }
 
   // Router con contexto
   const ctxNegocio = await contextoClientes();
   const d = await ollamaJSON(promptClasificar(texto, ctxNegocio), SCHEMA.clasificar);
   if (!d || Object.keys(d).length === 0) return res.json({ reply: '🤖 Uy, no te pude procesar (la IA no respondió). ¿Me lo repetís?' });
-  const intent = d.intencion || 'nuevo_trabajo';
+  // Sin intención clara ya NO asumimos "nuevo_trabajo": ese default era el que
+  // convertía cualquier mensaje suelto en un trabajo guardado con precio 0.
+  const intent = d.intencion || 'nada';
   const idMenc = d.id || (texto.match(/#?(\d{1,6})/) ? Number(texto.match(/#?(\d{1,6})/)[1]) : null);
 
-  if (intent === 'ver_activos') return res.json({ reply: await listarActivos(from) });
-  if (intent === 'ver_bandeja') return res.json({ reply: await listarBandeja() });
-  if (intent === 'ver_sin_presupuestar') return res.json({ reply: await listarSinPresup() });
-  if (intent === 'resumen') return res.json({ reply: await menuTexto() });
+  if (intent === 'ver_activos') return responderTema('trabajos');
+  if (intent === 'ver_bandeja') return responderTema('bandeja');
+  if (intent === 'ver_sin_presupuestar') return responderTema('sin_presupuestar');
+  if (intent === 'ver_precios') return responderTema('precios');
+  if (intent === 'cotizar') return res.json({ reply: await cotizarTexto(from, d, texto) });
+  if (intent === 'resumen') return res.json({ reply: await menuTexto(from) });
   if (intent === 'ayuda') return res.json({ reply: ayudaTexto() });
+  if (intent === 'nada') return res.json({ reply: await noEntendi(from) });
   if (intent === 'confirmar' || intent === 'descartar') {
     const pend = ctx.datos && ctx.datos.pendiente;
     const etiqueta = (tp) => tp === 'cheque' ? 'Cheque' : tp === 'pago' ? 'Pago' : 'Trabajo';
@@ -822,7 +1083,9 @@ router.post('/mensaje', async (req, res) => {
     // Dirección pedida en el propio texto: "por pagar" = emitidos, "por cobrar / entran" = recibidos.
     const filtro = /pagar|emitid|salen|debo pagar/i.test(texto) ? 'emitido'
       : /cobrar|recibid|entra/i.test(texto) ? 'recibido' : null;
-    return res.json({ reply: await listarCheques(filtro) });
+    const r = await listarCheques(filtro);
+    await setUltimo(from, 'cheques');
+    return res.json({ reply: r });
   }
   if (intent === 'nuevo_cheque') {
     const c = await ollamaJSON(promptCheque(texto), SCHEMA.cheque);
@@ -837,7 +1100,7 @@ router.post('/mensaje', async (req, res) => {
   }
 
   // ----- Pagos de servicios -----
-  if (intent === 'ver_pagos') return res.json({ reply: await listarPagos() });
+  if (intent === 'ver_pagos') return responderTema('pagos');
   if (intent === 'nuevo_pago') {
     const p = await ollamaJSON(promptPago(texto), SCHEMA.pago);
     const pg = await crearPago(p);
@@ -850,7 +1113,7 @@ router.post('/mensaje', async (req, res) => {
   }
 
   // ----- Lista de compras -----
-  if (intent === 'ver_compras') return res.json({ reply: await listarCompras() });
+  if (intent === 'ver_compras') return responderTema('compras');
   if (intent === 'nueva_compra') {
     const c = await ollamaJSON(promptCompra(texto), SCHEMA.compra);
     const cp = await crearCompra(c);
@@ -862,20 +1125,29 @@ router.post('/mensaje', async (req, res) => {
     return res.json({ reply: cp ? `✅ Tachado de la lista: ${cp.item}.` : 'No encontré ese ítem en la lista. Escribí "ver compras".' });
   }
 
-  // nuevo_trabajo (o fallback)
-  const tr = await crearBorradorDesde(d);
-  await setCtx(from, 'confirmando', { pendiente: { tipo: 'trabajo', id: tr.id, texto } });
-  return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar, "no" para descartar, o corregime (ej: "el precio es 50 lucas").` });
+  // nuevo_trabajo, PERO solo si de verdad parece un pedido (cliente + qué hacer).
+  // Sin esta guardia, todo lo que no encajaba en otra intención se guardaba como
+  // trabajo con precio 0: era la causa de que el bot pareciera tonto.
+  if (intent === 'nuevo_trabajo' && pareceTrabajo(texto, d)) {
+    const tr = await crearBorradorDesde(d);
+    await setCtx(from, 'confirmando', { pendiente: { tipo: 'trabajo', id: tr.id, texto }, ultimo: 'bandeja' });
+    return res.json({ reply: `🆕 Anoté #${tr.id}: ${tr.cliente} — ${tr.descripcion || ''} — ${money(tr.precio)}. Respondé "ok" para confirmar, "no" para descartar, o corregime (ej: "el precio es 50 lucas").` });
+  }
+  // No entendimos: preguntamos en vez de inventar.
+  return res.json({ reply: await noEntendi(from) });
  } catch (e) {
    console.error('mensaje error:', e.message);
    if (!res.headersSent) res.json({ reply: '🤖 Uf, tuve un problema con eso. Probá de nuevo en un ratito.' });
  }
 });
 
+// Recordatorio de las 9 y las 22. Devuelve reply:null cuando NO hay nada pendiente
+// (n8n corta ahí y no manda mensaje: nada de ruido cuando está todo al día).
 router.get('/nudge', async (req, res) => {
   const to = (req.query.to || '').trim();
-  if (to) await setCtx(to, 'idle', {});
-  res.json({ reply: await nudgeTexto() });
+  const reply = await nudgeTexto();
+  if (reply && to) await setCtx(to, 'idle', {});
+  res.json({ reply, hay: !!reply });
 });
 
 export default router;

@@ -22,6 +22,7 @@ const DATOS_TALLER = {
   cuit: '23-21372397-9',            // CUIT
   iibb: '108797',             // Ingresos Brutos
   inicio: '08/2015',                // Inicio de actividades (MM/AAAA)
+  iva: 'Responsable Inscripto',     // Condición frente al IVA del taller
   correo: 'graficarte@gmail.com',
   instagram: '@graficarte_mdz',
   whatsapp: '+54 9 261 580-8038',
@@ -929,7 +930,7 @@ function htmlPresupuesto({ num, fechaTxt, cliente, cuitCliente, direccion, local
   <header>
     <div>
       <img src="/brand/logo-negro.svg" alt="${esc(t.nombre)}">
-      <div class="fiscal">CUIT: ${esc(t.cuit)} · Ing. Brutos: ${esc(t.iibb)}<br>Inicio de actividades: ${esc(t.inicio)}</div>
+      <div class="fiscal">CUIT: ${esc(t.cuit)} · Ing. Brutos: ${esc(t.iibb)}<br>Inicio de actividades: ${esc(t.inicio)}<br>Condición frente al IVA: <b>${esc(t.iva || 'Responsable Inscripto')}</b></div>
     </div>
     <div class="doc-tit"><div class="ov">Presupuesto</div><h1>${num}</h1><div class="fch">${fechaTxt}</div></div>
   </header>

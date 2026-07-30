@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 6-21/3 * * *"
+              "expression": "0 9,22 * * *"
             }
           ]
         }
       },
       "id": "sch",
-      "name": "Cada 3 horas (6 a 21)",
+      "name": "9:00 y 22:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -60,6 +60,41 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "hay-pendiente",
+              "leftValue": "={{ $json.hay }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "hay_algo",
+      "name": "¿Hay algo pendiente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://172.17.0.1:3001/api/sendText",
         "sendHeaders": true,
@@ -81,13 +116,24 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        860,
-        300
+        1100,
+        220
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "sin_novedad",
+      "name": "Todo al día (no manda nada)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        400
       ]
     }
   ],
   "connections": {
-    "Cada 3 horas (6 a 21)": {
+    "9:00 y 22:00": {
       "main": [
         [
           {
@@ -113,7 +159,25 @@
       "main": [
         [
           {
+            "node": "¿Hay algo pendiente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay algo pendiente?": {
+      "main": [
+        [
+          {
             "node": "Enviar resumen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Todo al día (no manda nada)",
             "type": "main",
             "index": 0
           }
